@@ -13,6 +13,10 @@ fn err(context: &str, e: impl std::fmt::Display) -> String {
     format!("{context} : {e}")
 }
 
+fn chemin_suspect(rel: &str) -> String {
+    format!("Archive invalide ou malveillante : chemin suspect \"{rel}\".")
+}
+
 /// Joint un chemin relatif issu de l'archive (séparé par des `/`) sous `base`,
 /// en n'acceptant que des composants de chemin normaux.
 ///
@@ -23,10 +27,7 @@ fn err(context: &str, e: impl std::fmt::Display) -> String {
 /// qu'aux chemins lus depuis le manifest, tous deux contrôlés par l'auteur de
 /// l'archive.
 fn chemin_relatif_sur(base: &Path, rel: &str) -> Result<PathBuf, String> {
-    let suspect = || format!("Archive invalide ou malveillante : chemin suspect \"{rel}\".");
-    if rel.is_empty() {
-        return Err(suspect());
-    }
+    let suspect = || chemin_suspect(rel);
     let mut out = base.to_path_buf();
     for comp in rel.split('/') {
         if comp.is_empty()
@@ -274,11 +275,12 @@ pub fn restore(
         for asset in &manifest.assets {
             // archive_path = assets/<n>/<nom> → <assets_dir>/<n>/<nom>.
             // Chemin lu depuis le manifest, donc contrôlé par l'auteur de
-            // l'archive : même validation que les entrées ZIP.
+            // l'archive : préfixe `assets/` obligatoire, puis même validation
+            // que les entrées ZIP.
             let rel = asset
                 .archive_path
                 .strip_prefix("assets/")
-                .unwrap_or(&asset.archive_path);
+                .ok_or_else(|| chemin_suspect(&asset.archive_path))?;
             asset_dest_by_archive_path
                 .insert(asset.archive_path.clone(), chemin_relatif_sur(assets_dir, rel)?);
         }
@@ -288,6 +290,11 @@ pub fn restore(
     let mut assets_restored = 0usize;
     let mut plugin_staging: Option<PathBuf> = None;
 
+    // Politique d'extraction : une entrée hors des préfixes connus (config/,
+    // assets/ du manifest, plugins/64bit/, plugins/data/) est ignorée sans
+    // erreur — compatibilité ascendante avec de futurs formats, rien n'est
+    // écrit. En revanche, un chemin suspect SOUS un préfixe connu fait
+    // échouer toute la restauration (zip slip).
     for i in 0..archive.len() {
         let (name, is_dir) = {
             let entry = archive.by_index(i).map_err(|e| err("Lecture de l'archive", e))?;
@@ -302,16 +309,15 @@ pub fn restore(
             let dest = chemin_relatif_sur(&tmp_config, rel)?;
             extract_entry(&mut archive, i, &dest)?;
         } else if name.starts_with("assets/") {
-            if let Some(dest) = asset_dest_by_archive_path.get(&name).cloned() {
-                extract_entry(&mut archive, i, &dest)?;
+            if let Some(dest) = asset_dest_by_archive_path.get(&name) {
+                extract_entry(&mut archive, i, dest)?;
                 assets_restored += 1;
             }
         } else if let Some(rel) = name.strip_prefix("plugins/") {
             // Extraits d'abord vers un dossier de transit ; copiés vers le
             // dossier d'OBS à l'étape suivante.
             let staging = plugin_staging
-                .get_or_insert_with(|| std::env::temp_dir().join(format!("owbs-plugins-{stamp}")))
-                .clone();
+                .get_or_insert_with(|| std::env::temp_dir().join(format!("owbs-plugins-{stamp}")));
             // plugins/64bit/x.dll → obs-plugins/64bit/x.dll
             // plugins/data/<stem>/... → data/obs-plugins/<stem>/...
             let dest = if let Some(r) = rel.strip_prefix("64bit/") {
