@@ -73,6 +73,7 @@ assets/<n>/        # fichiers médias référencés par les scènes
 - `src-tauri/src/sanitize.rs` — suppression des secrets (clé de stream, tokens, cookies)
 - `src-tauri/src/scenes.rs` — extraction et réécriture des chemins d'assets
 - `src-tauri/src/backup.rs` — pipeline de sauvegarde → `.obsbackup`
-- `src-tauri/src/restore.rs` — restauration atomique avec copie de sécurité
-  automatique de la configuration existante (`obs-studio.bak-<date>`)
+- `src-tauri/src/restore.rs` — restauration avec copie de sécurité automatique
+  de la configuration existante (`obs-studio.bak-<date>`) et rollback en cas
+  d'échec de la bascule
 - `src/` — interface (Vite + TypeScript, en français)

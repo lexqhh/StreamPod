@@ -1,5 +1,7 @@
 pub mod backup;
+pub mod devices;
 pub mod obs;
+pub mod remap;
 pub mod restore;
 pub mod sanitize;
 pub mod scenes;
@@ -63,13 +65,29 @@ async fn restore_preview(backup_path: String) -> Result<restore::RestorePreview,
         .map_err(|e| e.to_string())?
 }
 
+/// Diagnostic du remappage matériel : lecture seule de l'archive + inventaire
+/// des périphériques de ce PC. Aucune extraction, aucun dossier temporaire.
+#[tauri::command]
+async fn remap_preview(backup_path: String) -> Result<remap::RemapReport, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let peripheriques = devices::inventaire()?;
+        remap::analyser(Path::new(&backup_path), peripheriques)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Restauration complète. `choix` contient les remplacements de périphériques
+/// confirmés à l'écran de remappage (vide si rien à remapper) : ils sont
+/// revalidés côté Rust avant application.
 #[tauri::command]
 async fn restore_run(
     app: tauri::AppHandle,
     backup_path: String,
+    choix: Vec<remap::Choix>,
 ) -> Result<restore::RestoreSummary, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        restore::restore(Path::new(&backup_path), |p| {
+        restore::restore(Path::new(&backup_path), &choix, |p| {
             let _ = app.emit("owbs://progress", &p);
         })
     })
@@ -87,6 +105,7 @@ pub fn run() {
             backup_preview,
             backup_create,
             restore_preview,
+            remap_preview,
             restore_run
         ])
         .run(tauri::generate_context!())

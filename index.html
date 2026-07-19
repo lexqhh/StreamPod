@@ -81,6 +81,23 @@
         </div>
       </section>
 
+      <!-- Remappage des périphériques -->
+      <section id="screen-remap" class="screen hidden">
+        <h2 id="remap-title">Périphériques à confirmer</h2>
+        <p class="remap-intro">
+          Ces périphériques de la sauvegarde n'existent pas sur ce PC.
+          Choisissez leur remplaçant, ou laissez-les inchangés pour les régler
+          plus tard dans OBS. Rien n'est modifié sans votre confirmation.
+        </p>
+        <div id="remap-list" class="remap-list"></div>
+        <div class="actions">
+          <button class="btn secondary" data-goto="restore-preview">Retour</button>
+          <button id="btn-continue-restore" class="btn primary">
+            Continuer la restauration
+          </button>
+        </div>
+      </section>
+
       <!-- Progression -->
       <section id="screen-progress" class="screen hidden">
         <h2 id="progress-title">Sauvegarde en cours…</h2>

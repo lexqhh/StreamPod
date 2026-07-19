@@ -36,7 +36,8 @@ fn write_archive(path: &Path, manifest: &Manifest, entries: &[(&str, &[u8])]) {
 }
 
 fn restauration_refusee(backup: &Path) {
-    let e = restore::restore(backup, |_| {}).expect_err("la restauration aurait dû être refusée");
+    let e = restore::restore(backup, &[], |_| {})
+        .expect_err("la restauration aurait dû être refusée");
     assert!(
         e.contains("Archive invalide ou malveillante"),
         "message inattendu : {e}"

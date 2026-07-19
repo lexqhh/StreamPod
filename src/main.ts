@@ -65,6 +65,42 @@ interface RestoreSummary {
   plugins_status: string;
   plugins: string[];
   previous_config_backup: string | null;
+  sources_remappees: number;
+}
+
+type Famille = "entree_audio" | "sortie_audio" | "video";
+
+interface Peripherique {
+  famille: Famille;
+  id: string;
+  nom: string;
+}
+
+interface SourceConcernee {
+  collection: string;
+  source: string;
+}
+
+interface Association {
+  famille: Famille;
+  ancien_id: string;
+  ancien_nom: string;
+  sources: SourceConcernee[];
+  occurrences: number;
+  candidats: Peripherique[];
+}
+
+interface RemapReport {
+  a_confirmer: Association[];
+  references_valides: number;
+  peripheriques: Peripherique[];
+}
+
+/** Choix explicite de l'utilisateur pour un ancien identifiant. */
+interface RemapChoice {
+  famille: Famille;
+  ancien_id: string;
+  nouveau_id: string;
 }
 
 interface Progress {
@@ -83,6 +119,7 @@ const SCREENS = [
   "home",
   "backup-preview",
   "restore-preview",
+  "remap",
   "progress",
   "done",
 ] as const;
@@ -92,6 +129,7 @@ function show(screen: Screen) {
   for (const s of SCREENS) {
     $(`screen-${s}`).classList.toggle("hidden", s !== screen);
   }
+  window.scrollTo({ top: 0, left: 0 });
 }
 
 function showError(message: string) {
@@ -316,9 +354,135 @@ async function startRestoreFlow() {
   }
 }
 
-async function runRestore() {
+/* ---------- Remappage des périphériques ---------- */
+
+const FAMILLE_LABELS: Record<Famille, string> = {
+  entree_audio: "Entrée audio",
+  sortie_audio: "Sortie audio",
+  video: "Vidéo / webcam",
+};
+
+let currentRemapReport: RemapReport | null = null;
+let remapChoices: RemapChoice[] = [];
+
+/** Avant de restaurer : diagnostic en lecture seule des périphériques.
+ *  S'il n'y a rien à confirmer, la restauration démarre directement. */
+async function prepareRestore() {
   if (!selectedBackupPath) return;
   hideError();
+  currentRemapReport = null;
+  remapChoices = [];
+
+  let report: RemapReport | null = null;
+  try {
+    report = await invoke<RemapReport>("remap_preview", {
+      backupPath: selectedBackupPath,
+    });
+  } catch (e) {
+    showError(
+      `L'analyse des périphériques a échoué. La restauration n'a pas démarré : ` +
+        `réessayez avant de continuer. (${String(e)})`,
+    );
+    return;
+  }
+
+  if (!report) {
+    showError("L'analyse des périphériques n'a retourné aucun résultat.");
+    return;
+  }
+  if (report.a_confirmer.length === 0) {
+    await runRestore();
+    return;
+  }
+  currentRemapReport = report;
+  renderRemapScreen(report);
+  show("remap");
+}
+
+function remapItem(assoc: Association, index: number): HTMLElement {
+  const item = document.createElement("div");
+  item.className = "remap-item";
+
+  const header = document.createElement("div");
+  header.className = "remap-item-header";
+  const title = document.createElement("span");
+  title.className = "remap-item-title";
+  title.textContent = assoc.ancien_nom;
+  const badge = document.createElement("span");
+  badge.className = "remap-badge";
+  badge.textContent = FAMILLE_LABELS[assoc.famille];
+  header.append(title, badge);
+
+  const usage = document.createElement("p");
+  usage.className = "remap-usage";
+  const exemples = [...new Set(assoc.sources.map((s) => s.source))];
+  usage.textContent =
+    (assoc.occurrences === 1
+      ? "Utilisé par 1 source : "
+      : `Utilisé par ${assoc.occurrences} sources : `) + listOrDash(exemples, 3);
+
+  const choice = document.createElement("div");
+  choice.className = "remap-choice";
+  const label = document.createElement("label");
+  label.className = "label";
+  label.textContent = "Utiliser sur ce PC :";
+  label.htmlFor = `remap-select-${index}`;
+  const select = document.createElement("select");
+  select.className = "remap-select";
+  select.id = `remap-select-${index}`;
+  select.dataset.index = String(index);
+  const keep = document.createElement("option");
+  keep.value = "";
+  keep.textContent = "Laisser cette source inchangée";
+  select.append(keep);
+  for (const c of assoc.candidats) {
+    const opt = document.createElement("option");
+    opt.value = c.id;
+    opt.textContent = c.nom;
+    select.append(opt);
+  }
+  if (assoc.candidats.length === 0) {
+    keep.textContent = "Aucun périphérique compatible détecté — laisser inchangé";
+    select.disabled = true;
+  }
+  choice.append(label, select);
+
+  item.append(header, usage, choice);
+  return item;
+}
+
+function renderRemapScreen(report: RemapReport) {
+  const n = report.a_confirmer.length;
+  $("remap-title").textContent =
+    n === 1
+      ? "1 périphérique est à confirmer sur ce PC"
+      : `${n} périphériques sont à confirmer sur ce PC`;
+  $("remap-list").replaceChildren(...report.a_confirmer.map(remapItem));
+}
+
+/** Lit les listes déroulantes : seuls les remplacements explicitement
+ *  choisis sont retenus, « Laisser inchangé » ne produit aucun choix. */
+function collectRemapChoices(): RemapChoice[] {
+  const report = currentRemapReport;
+  if (!report) return [];
+  const choices: RemapChoice[] = [];
+  document
+    .querySelectorAll<HTMLSelectElement>("#remap-list select")
+    .forEach((sel) => {
+      const assoc = report.a_confirmer[Number(sel.dataset.index)];
+      if (assoc && sel.value) {
+        choices.push({
+          famille: assoc.famille,
+          ancien_id: assoc.ancien_id,
+          nouveau_id: sel.value,
+        });
+      }
+    });
+  return choices;
+}
+
+async function runRestore() {
+  if (!selectedBackupPath) return;
 
   $("progress-title").textContent = "Restauration en cours…";
   $("progress-bar").style.width = "0%";
@@ -328,6 +492,7 @@ async function runRestore() {
   try {
     const result = await invoke<RestoreSummary>("restore_run", {
       backupPath: selectedBackupPath,
+      choix: remapChoices,
     });
     $("done-title").textContent = "Restauration terminée !";
     const details = $("done-details");
@@ -365,6 +530,34 @@ async function runRestore() {
         );
       }
     }
+    if (result.sources_remappees > 0) {
+      notes.append(
+        noteItem(
+          result.sources_remappees === 1
+            ? "✔ 1 source utilise maintenant le périphérique choisi pour ce PC."
+            : `✔ ${result.sources_remappees} sources utilisent maintenant les périphériques choisis pour ce PC.`,
+          "note",
+        ),
+      );
+    }
+    // Périphériques laissés inchangés à l'écran de remappage : leur ancien
+    // identifiant n'existe pas sur ce PC, ils restent à régler dans OBS.
+    const inchanges = (currentRemapReport?.a_confirmer ?? []).filter(
+      (a) =>
+        !remapChoices.some(
+          (c) => c.famille === a.famille && c.ancien_id === a.ancien_id,
+        ),
+    );
+    if (inchanges.length > 0) {
+      notes.append(
+        noteItem(
+          `Restent à vérifier dans OBS (sources laissées inchangées) : ` +
+            inchanges.map((a) => a.ancien_nom).join(", ") +
+            `. Choisissez un périphérique dans les propriétés de ces sources.`,
+          "warning",
+        ),
+      );
+    }
     notes.append(
       noteItem(
         "Dernière étape : ouvrez OBS et reconnectez votre compte ou re-saisissez votre clé " +
@@ -385,7 +578,11 @@ window.addEventListener("DOMContentLoaded", () => {
   $("card-backup").addEventListener("click", startBackupFlow);
   $("card-restore").addEventListener("click", startRestoreFlow);
   $("btn-start-backup").addEventListener("click", runBackup);
-  $("btn-start-restore").addEventListener("click", runRestore);
+  $("btn-start-restore").addEventListener("click", prepareRestore);
+  $("btn-continue-restore").addEventListener("click", () => {
+    remapChoices = collectRemapChoices();
+    void runRestore();
+  });
   $("error-close").addEventListener("click", hideError);
 
   document.querySelectorAll<HTMLElement>("[data-goto]").forEach((el) => {

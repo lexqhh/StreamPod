@@ -220,7 +220,7 @@ fn backup_puis_restore_round_trip() {
     std::env::set_var("OWBS_INSTALL_DIR", &install_dst);
     std::env::set_var("OWBS_OBS_VERSION", "31.1.0"); // même version majeure
 
-    let result = restore::restore(&backup_file, |_| {}).unwrap();
+    let result = restore::restore(&backup_file, &[], |_| {}).unwrap();
     assert_eq!(result.scene_collections, 1);
     assert_eq!(result.assets_restored, 1);
     assert_eq!(result.plugins_status, "copied");
@@ -283,7 +283,141 @@ fn backup_puis_restore_round_trip() {
 
     // --- Seconde restauration : l'ancienne config est mise de côté ---
     std::thread::sleep(std::time::Duration::from_millis(1100)); // horodatage différent
-    let result2 = restore::restore(&backup_file, |_| {}).unwrap();
+    let result2 = restore::restore(&backup_file, &[], |_| {}).unwrap();
     let bak = result2.previous_config_backup.expect("copie de sécurité attendue");
     assert!(Path::new(&bak).join("global.ini").is_file());
+}
+
+/// Étape 2 du remappage matériel : le diagnostic est strictement en lecture
+/// seule — il détecte les périphériques absents sans extraire, sans créer de
+/// dossier temporaire, sans restaurer d'asset et sans modifier l'archive.
+#[test]
+fn diagnostic_remappage_en_lecture_seule() {
+    use owbs_lib::devices::{Famille, Peripherique};
+    use owbs_lib::remap;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+
+    // --- Fausse machine source : scènes avec périphériques + audio global ---
+    let config_src = root.join("obs-studio-src");
+    let scenes = config_src.join("basic").join("scenes");
+    fs::create_dir_all(&scenes).unwrap();
+    fs::write(
+        scenes.join("Stream.json"),
+        r#"{
+  "name": "Stream",
+  "AuxAudioDevice1": { "id": "wasapi_input_capture", "name": "Mic/Aux",
+                       "settings": { "device_id": "default" } },
+  "DesktopAudioDevice1": { "id": "wasapi_output_capture", "name": "Casque ancien",
+                           "settings": { "device_id": "{0.0.0.00000000}.{dead-beef}" } },
+  "sources": [
+    { "id": "wasapi_input_capture", "name": "Micro principal",
+      "settings": { "device_id": "{0.0.1.00000000}.{ancien-micro}" } },
+    { "id": "wasapi_input_capture", "name": "Micro secondaire",
+      "settings": { "device_id": "{0.0.1.00000000}.{ancien-micro}" } },
+    { "id": "wasapi_input_capture", "name": "Micro encore branché",
+      "settings": { "device_id": "{0.0.1.00000000}.{micro-valide}" } },
+    { "id": "dshow_input", "name": "Webcam",
+      "settings": { "video_device_id": "Webcam C900:\\\\?\\usb#22vid_1234#22{65e8773d}\\global",
+                    "last_video_device_id": "Webcam C900:\\\\?\\usb#22vid_1234#22{65e8773d}\\global" } },
+    { "id": "plugin_tiers_source", "name": "Plugin tiers",
+      "settings": { "device_id": "{0.0.1.00000000}.{plugin-prive}" } }
+  ]
+}"#,
+    )
+    .unwrap();
+    fs::write(config_src.join("global.ini"), "[General]\nFirstRun=false\n").unwrap();
+
+    // --- Sauvegarde ---
+    let backup_file = root.join("diag.obsbackup");
+    backup::create(&config_src, None, Some("32.1.2".to_string()), &backup_file, |_| {}).unwrap();
+    let archive_avant = fs::read(&backup_file).unwrap();
+
+    // --- Inventaire cible factice : le micro « valide » existe encore, la
+    // webcam a un nouveau chemin matériel, et un remplaçant existe par
+    // famille. La configuration réelle de la machine n'est jamais consultée
+    // (aucune variable OWBS_* n'est définie dans ce test). ---
+    let inventaire = vec![
+        Peripherique {
+            famille: Famille::EntreeAudio,
+            id: "{0.0.1.00000000}.{micro-valide}".to_string(),
+            nom: "Micro encore branché".to_string(),
+        },
+        Peripherique {
+            famille: Famille::EntreeAudio,
+            id: "{0.0.1.00000000}.{nouveau-micro}".to_string(),
+            nom: "HyperX QuadCast".to_string(),
+        },
+        Peripherique {
+            famille: Famille::SortieAudio,
+            id: "{0.0.0.00000000}.{nouveau-casque}".to_string(),
+            nom: "Casque USB".to_string(),
+        },
+        Peripherique {
+            famille: Famille::Video,
+            id: r"Webcam C900:\\?\usb#22vid_1234#22autre-port#22{65e8773d}\global".to_string(),
+            nom: "Webcam C900".to_string(),
+        },
+    ];
+
+    let rapport = remap::analyser(&backup_file, inventaire).unwrap();
+
+    // Trois associations à confirmer : micro absent (regroupé), casque
+    // absent (audio global), webcam au chemin changé.
+    assert_eq!(rapport.a_confirmer.len(), 3, "{:#?}", rapport.a_confirmer);
+    let micro = rapport
+        .a_confirmer
+        .iter()
+        .find(|a| a.ancien_id.contains("ancien-micro"))
+        .expect("micro absent attendu");
+    assert_eq!(micro.famille, Famille::EntreeAudio);
+    assert_eq!(micro.occurrences, 2, "les 2 sources partagent une décision");
+    let casque = rapport
+        .a_confirmer
+        .iter()
+        .find(|a| a.ancien_id.contains("dead-beef"))
+        .expect("sortie audio globale absente attendue");
+    assert_eq!(casque.famille, Famille::SortieAudio);
+    assert_eq!(casque.ancien_nom, "Casque ancien");
+    let webcam = rapport
+        .a_confirmer
+        .iter()
+        .find(|a| a.famille == Famille::Video)
+        .expect("webcam au chemin changé attendue");
+    assert_eq!(webcam.ancien_nom, "Webcam C900");
+
+    // `default` et le micro encore branché restent valides, sans question.
+    assert_eq!(rapport.references_valides, 2);
+    // La source du plugin tiers n'est jamais analysée.
+    assert!(rapport
+        .a_confirmer
+        .iter()
+        .all(|a| !a.ancien_id.contains("plugin-prive")));
+
+    // Lecture seule : archive inchangée au bit près, aucun dossier
+    // temporaire de restauration, aucun asset restauré.
+    assert_eq!(archive_avant, fs::read(&backup_file).unwrap());
+    let reste: Vec<String> = walkdir_noms(root);
+    assert!(
+        reste.iter().all(|n| !n.contains("obs-studio.tmp-")),
+        "dossier temporaire créé : {reste:?}"
+    );
+    assert!(!root.join("OBS-Backup-Assets").exists());
+}
+
+/// Liste les noms de tous les fichiers et dossiers sous `root`.
+fn walkdir_noms(root: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        for entry in entries.flatten() {
+            out.push(entry.file_name().to_string_lossy().into_owned());
+            if entry.path().is_dir() {
+                stack.push(entry.path());
+            }
+        }
+    }
+    out
 }

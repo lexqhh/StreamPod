@@ -89,7 +89,7 @@ fn sauvegarde_reelle_puis_restauration_en_bac_a_sable() {
         std::env::set_var("OWBS_OBS_VERSION", v);
     }
 
-    let result = restore::restore(&backup_file, |_| {}).unwrap();
+    let result = restore::restore(&backup_file, &[], |_| {}).unwrap();
     println!(
         "Restauration : {} scènes, {} assets, plugins = {} ({:?})",
         result.scene_collections, result.assets_restored, result.plugins_status, result.plugins
@@ -97,4 +97,46 @@ fn sauvegarde_reelle_puis_restauration_en_bac_a_sable() {
     assert_eq!(result.scene_collections, summary.scene_collections);
     assert!(sandbox.join("obs-studio").join("global.ini").is_file()
         || sandbox.join("obs-studio").join("user.ini").is_file());
+}
+
+/// Énumération réelle des périphériques (lecture seule, aucune écriture).
+/// Vérifie que les identifiants produits ont exactement le format qu'OBS
+/// écrit dans ses JSON (voir ETAPE1-FORMATS-OBS.md).
+#[test]
+#[ignore]
+fn inventaire_reel_des_peripheriques() {
+    use owbs_lib::devices::{self, Famille};
+
+    let inventaire = devices::inventaire_reel().unwrap();
+    let entrees = inventaire.iter().filter(|p| p.famille == Famille::EntreeAudio).count();
+    let sorties = inventaire.iter().filter(|p| p.famille == Famille::SortieAudio).count();
+    let videos = inventaire.iter().filter(|p| p.famille == Famille::Video).count();
+    println!("Inventaire : {entrees} entrée(s) audio, {sorties} sortie(s) audio, {videos} périphérique(s) vidéo");
+
+    for p in &inventaire {
+        // Pas d'identifiant réel dans la sortie du test : seuls les formats
+        // sont vérifiés.
+        match p.famille {
+            Famille::EntreeAudio => assert!(
+                p.id.starts_with("{0.0.1."),
+                "format d'entrée audio inattendu pour « {} »", p.nom
+            ),
+            Famille::SortieAudio => assert!(
+                p.id.starts_with("{0.0.0."),
+                "format de sortie audio inattendu pour « {} »", p.nom
+            ),
+            Famille::Video => {
+                assert!(
+                    p.id.contains(':'),
+                    "identifiant vidéo sans séparateur pour « {} »", p.nom
+                );
+                assert_eq!(
+                    devices::nom_video(&p.id).as_deref(),
+                    Some(p.nom.as_str()),
+                    "le nom encodé doit correspondre au nom convivial"
+                );
+            }
+        }
+        assert!(!p.nom.is_empty());
+    }
 }

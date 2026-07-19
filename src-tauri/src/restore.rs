@@ -1,7 +1,7 @@
 //! Pipeline de restauration : fichier .obsbackup → configuration OBS.
 
 use crate::backup::{asset_mapping_from_manifest, Manifest, Progress};
-use crate::{obs, scenes};
+use crate::{devices, obs, remap, scenes};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -26,7 +26,7 @@ fn chemin_suspect(rel: &str) -> String {
 /// n'importe où sur le disque. S'applique aussi bien aux noms d'entrées ZIP
 /// qu'aux chemins lus depuis le manifest, tous deux contrôlés par l'auteur de
 /// l'archive.
-fn chemin_relatif_sur(base: &Path, rel: &str) -> Result<PathBuf, String> {
+pub(crate) fn chemin_relatif_sur(base: &Path, rel: &str) -> Result<PathBuf, String> {
     let suspect = || chemin_suspect(rel);
     let mut out = base.to_path_buf();
     for comp in rel.split('/') {
@@ -78,9 +78,12 @@ pub struct RestoreSummary {
     pub plugins: Vec<String>,
     /// Copie de sécurité de l'ancienne configuration, le cas échéant.
     pub previous_config_backup: Option<String>,
+    /// Nombre de sources dont le périphérique a été remplacé selon les choix
+    /// de l'utilisateur.
+    pub sources_remappees: usize,
 }
 
-fn open_archive(backup_path: &Path) -> Result<ZipArchive<File>, String> {
+pub(crate) fn open_archive(backup_path: &Path) -> Result<ZipArchive<File>, String> {
     let file = File::open(backup_path)
         .map_err(|e| err(&format!("Ouverture de {}", backup_path.display()), e))?;
     ZipArchive::new(file).map_err(|e| {
@@ -227,9 +230,74 @@ fn copy_plugins_elevated(staging: &Path, install_dir: &Path) -> Result<(), Strin
     }
 }
 
-/// Restaure une sauvegarde .obsbackup.
+/// Bascule la nouvelle configuration (`tmp`) à la place de l'ancienne
+/// (`target`), l'ancienne étant mise de côté dans `bak`.
+///
+/// Deux renames successifs ne sont jamais atomiques ensemble. Si la mise en
+/// place de la nouvelle configuration échoue, l'ancienne est remise en place
+/// automatiquement (rollback). Si ce rollback échoue aussi, le message
+/// d'erreur donne les chemins exacts pour réparer à la main.
+///
+/// Retourne le chemin du `.bak` créé, ou `None` si aucune configuration
+/// n'existait (première restauration).
+fn basculer_config(target: &Path, tmp: &Path, bak: &Path) -> Result<Option<String>, String> {
+    basculer_config_avec(target, tmp, bak, |from, to| std::fs::rename(from, to))
+}
+
+/// Variante à fonction de rename injectable, pour tester les scénarios
+/// d'échec de façon déterministe.
+fn basculer_config_avec(
+    target: &Path,
+    tmp: &Path,
+    bak: &Path,
+    rename: impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> Result<Option<String>, String> {
+    let mut previous_backup = None;
+    if target.exists() {
+        if let Err(e) = rename(target, bak) {
+            // Rien n'a encore bougé : la configuration active est intacte et
+            // l'extraction temporaire peut être supprimée sans risque.
+            let _ = std::fs::remove_dir_all(tmp);
+            return Err(err(
+                "Impossible de mettre de côté la configuration existante (OBS ouvert ?)",
+                e,
+            ));
+        }
+        previous_backup = Some(bak.to_string_lossy().into_owned());
+    }
+    if let Err(e) = rename(tmp, target) {
+        if previous_backup.is_none() {
+            // Première restauration : rien à remettre en place.
+            let _ = std::fs::remove_dir_all(tmp);
+            return Err(err("Mise en place de la nouvelle configuration", e));
+        }
+        if let Err(rb) = rename(bak, target) {
+            return Err(format!(
+                "La mise en place de la nouvelle configuration a échoué ({e}), et la remise \
+                 en place de votre ancienne configuration a échoué aussi ({rb}). Votre \
+                 configuration d'origine est intacte dans « {} » : renommez ce dossier en \
+                 « {} » pour la retrouver. La configuration extraite de la sauvegarde se \
+                 trouve dans « {} ».",
+                bak.display(),
+                target.display(),
+                tmp.display()
+            ));
+        }
+        // Rollback réussi : ne pas laisser traîner le dossier temporaire.
+        let _ = std::fs::remove_dir_all(tmp);
+        return Err(format!(
+            "La restauration a échoué ({e}). Votre configuration d'origine a été remise en \
+             place : la configuration OBS active n'a pas été modifiée."
+        ));
+    }
+    Ok(previous_backup)
+}
+
+/// Restaure une sauvegarde .obsbackup en appliquant les choix de remappage
+/// matériel confirmés par l'utilisateur (`choix` peut être vide).
 pub fn restore(
     backup_path: &Path,
+    choix: &[remap::Choix],
     progress: impl Fn(Progress),
 ) -> Result<RestoreSummary, String> {
     let report = |step: &str, message: String, current: u64, total: u64| {
@@ -251,6 +319,17 @@ pub fn restore(
     let mut archive = open_archive(backup_path)?;
     let manifest = read_manifest(&mut archive)?;
 
+    // Revalidation des choix de remappage contre l'inventaire actuel, avant
+    // la moindre écriture : un périphérique débranché depuis l'aperçu arrête
+    // tout ici, la configuration en place et le disque restent intacts.
+    let choix_valides = if choix.is_empty() {
+        Vec::new()
+    } else {
+        let inventaire = devices::inventaire()?;
+        let rapport = remap::analyser(backup_path, inventaire.clone())?;
+        remap::valider_choix(choix, &inventaire, &rapport.a_confirmer)?
+    };
+
     let target_config = obs::config_dir_target()
         .ok_or("Impossible de déterminer le dossier de configuration OBS.")?;
     let parent = target_config
@@ -264,7 +343,8 @@ pub fn restore(
     let tmp_config = parent.join(format!("obs-studio.tmp-{stamp}"));
 
     // 1. Extraction de la configuration vers un dossier temporaire (jamais
-    //    directement sur la config existante : écriture atomique).
+    //    directement sur la config existante : la bascule ne se fait qu'une
+    //    fois l'extraction terminée, avec rollback en cas d'échec).
     // 2. Extraction des assets vers le dossier d'assets.
     let assets_dir = obs::assets_target_dir();
     let mut asset_dest_by_archive_path: BTreeMap<String, PathBuf> = BTreeMap::new();
@@ -366,24 +446,26 @@ pub fn restore(
         }
     }
 
-    // 4. Bascule : l'ancienne config devient une copie de sécurité, la
-    //    nouvelle prend sa place.
-    report("swap", "Mise en place de la configuration…".into(), 0, 1);
-    let mut previous_backup = None;
-    if target_config.exists() {
-        let bak = parent.join(format!("obs-studio.bak-{stamp}"));
-        std::fs::rename(&target_config, &bak).map_err(|e| {
-            err(
-                "Impossible de mettre de côté la configuration existante (OBS ouvert ?)",
-                e,
-            )
+    // 4. Application des choix de remappage matériel dans la copie
+    //    temporaire, avant la bascule. En cas d'échec, l'extraction
+    //    temporaire est supprimée : jamais de configuration partiellement
+    //    installée, la configuration active n'a pas bougé.
+    let mut sources_remappees = 0;
+    if !choix_valides.is_empty() {
+        report("remap", "Remplacement des périphériques…".into(), 0, 1);
+        sources_remappees = remap::appliquer(&scenes_dir, &choix_valides).inspect_err(|_| {
+            let _ = std::fs::remove_dir_all(&tmp_config);
         })?;
-        previous_backup = Some(bak.to_string_lossy().into_owned());
     }
-    std::fs::rename(&tmp_config, &target_config)
-        .map_err(|e| err("Mise en place de la nouvelle configuration", e))?;
 
-    // 5. Plugins.
+    // 5. Bascule avec rollback : l'ancienne config devient une copie de
+    //    sécurité, la nouvelle prend sa place ; en cas d'échec, l'ancienne
+    //    configuration est remise en place automatiquement.
+    report("swap", "Mise en place de la configuration…".into(), 0, 1);
+    let bak = parent.join(format!("obs-studio.bak-{stamp}"));
+    let previous_backup = basculer_config(&target_config, &tmp_config, &bak)?;
+
+    // 6. Plugins.
     let mut plugins_status = "none".to_string();
     if !manifest.plugins.is_empty() {
         report("plugins", "Installation des plugins…".into(), 0, 1);
@@ -422,13 +504,128 @@ pub fn restore(
         plugins_status,
         plugins: manifest.plugins.iter().map(|p| p.name.clone()).collect(),
         previous_config_backup: previous_backup,
+        sources_remappees,
     })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::chemin_relatif_sur;
+    use super::{basculer_config, chemin_relatif_sur};
     use std::path::Path;
+
+    /// Prépare un tempdir avec un dossier tmp contenant un fichier marqueur.
+    fn bac_a_sable() -> (
+        tempfile::TempDir,
+        std::path::PathBuf,
+        std::path::PathBuf,
+        std::path::PathBuf,
+    ) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("obs-studio");
+        let tmp = dir.path().join("obs-studio.tmp-test");
+        let bak = dir.path().join("obs-studio.bak-test");
+        std::fs::create_dir(&tmp).unwrap();
+        std::fs::write(tmp.join("nouvelle.txt"), "nouvelle config").unwrap();
+        (dir, target, tmp, bak)
+    }
+
+    #[test]
+    fn bascule_nominale_ancienne_config_mise_de_cote() {
+        let (_dir, target, tmp, bak) = bac_a_sable();
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("ancienne.txt"), "ancienne config").unwrap();
+
+        let previous = basculer_config(&target, &tmp, &bak).unwrap();
+
+        assert_eq!(previous, Some(bak.to_string_lossy().into_owned()));
+        assert!(target.join("nouvelle.txt").is_file());
+        assert!(bak.join("ancienne.txt").is_file());
+        assert!(!tmp.exists());
+    }
+
+    #[test]
+    fn bascule_premiere_restauration_sans_bak() {
+        let (_dir, target, tmp, bak) = bac_a_sable();
+
+        let previous = basculer_config(&target, &tmp, &bak).unwrap();
+
+        assert_eq!(previous, None);
+        assert!(target.join("nouvelle.txt").is_file());
+        assert!(!bak.exists());
+    }
+
+    #[test]
+    fn echec_de_mise_de_cote_conserve_la_config_active() {
+        let (_dir, target, tmp, bak) = bac_a_sable();
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("ancienne.txt"), "ancienne config").unwrap();
+
+        let e = super::basculer_config_avec(&target, &tmp, &bak, |_from, _to| {
+            Err(std::io::Error::other("sabotage : verrou simulé"))
+        })
+        .expect_err("la mise de côté aurait dû échouer");
+
+        assert!(e.contains("mettre de côté"), "{e}");
+        assert_eq!(
+            std::fs::read_to_string(target.join("ancienne.txt")).unwrap(),
+            "ancienne config"
+        );
+        assert!(!bak.exists());
+        assert!(!tmp.exists(), "le dossier temporaire devait être nettoyé");
+    }
+
+    #[test]
+    fn echec_de_mise_en_place_rollback_automatique() {
+        let (_dir, target, tmp, bak) = bac_a_sable();
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("ancienne.txt"), "ancienne config").unwrap();
+
+        // Échec déterministe du second rename (tmp → target) via injection.
+        let e = super::basculer_config_avec(&target, &tmp, &bak, |from, to| {
+            if from == tmp {
+                Err(std::io::Error::other("sabotage : verrou simulé"))
+            } else {
+                std::fs::rename(from, to)
+            }
+        })
+        .expect_err("la bascule aurait dû échouer");
+
+        assert!(e.contains("remise en place"), "{e}");
+        // La config d'origine est de nouveau à sa place, contenu intact.
+        assert_eq!(
+            std::fs::read_to_string(target.join("ancienne.txt")).unwrap(),
+            "ancienne config"
+        );
+        assert!(!bak.exists());
+        // Le dossier temporaire orphelin a été nettoyé (best effort).
+        assert!(!tmp.exists());
+    }
+
+    #[test]
+    fn double_echec_le_message_donne_les_chemins_de_reparation() {
+        let (_dir, target, tmp, bak) = bac_a_sable();
+        std::fs::create_dir(&target).unwrap();
+        std::fs::write(target.join("ancienne.txt"), "ancienne config").unwrap();
+
+        // Seul le rename n°1 (mise de côté) réussit ; tout le reste échoue,
+        // y compris le rollback.
+        let e = super::basculer_config_avec(&target, &tmp, &bak, |from, to| {
+            if from == target {
+                std::fs::rename(from, to)
+            } else {
+                Err(std::io::Error::other("sabotage total"))
+            }
+        })
+        .expect_err("la bascule aurait dû échouer");
+
+        // Le message doit donner les chemins absolus pour réparer à la main.
+        assert!(e.contains(&bak.display().to_string()), "{e}");
+        assert!(e.contains(&target.display().to_string()), "{e}");
+        assert!(e.contains(&tmp.display().to_string()), "{e}");
+        // La config d'origine survit dans le .bak, le tmp n'est pas supprimé.
+        assert!(bak.join("ancienne.txt").is_file());
+        assert!(tmp.join("nouvelle.txt").is_file());
+    }
 
     #[test]
     fn chemins_legitimes_acceptes() {

@@ -24,9 +24,22 @@
   box-sizing: border-box;
 }
 
+html,
+body {
+  width: 100%;
+  min-width: 0;
+}
+
+html {
+  height: 100%;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
+  min-height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
   background:
     radial-gradient(1000px 500px at 80% -10%, rgba(124, 92, 255, 0.14), transparent 60%),
     var(--bg);
@@ -34,13 +47,25 @@ body {
 }
 
 .app {
+  width: 100%;
+  min-height: 100vh;
+  min-height: 100dvh;
   max-width: 860px;
   margin: 0 auto;
   padding: 2rem 1.5rem 3rem;
 }
 
+.screen {
+  min-width: 0;
+}
+
 .hidden {
   display: none !important;
+}
+
+button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 65%, white);
+  outline-offset: 3px;
 }
 
 /* ---------- En-tête ---------- */
@@ -58,6 +83,7 @@ body {
   display: flex;
   align-items: center;
   gap: 0.9rem;
+  min-width: 0;
 }
 
 .brand-icon {
@@ -92,6 +118,7 @@ body {
   border-radius: 999px;
   padding: 0.45rem 0.9rem;
   max-width: 340px;
+  overflow-wrap: anywhere;
 }
 
 .obs-status.ok {
@@ -117,6 +144,12 @@ body {
   border-radius: 12px;
   padding: 0.8rem 1rem;
   margin-bottom: 1.5rem;
+}
+
+#error-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
 }
 
 .link-btn {
@@ -233,9 +266,10 @@ body {
 }
 
 .summary-row .value {
+  min-width: 0;
   font-weight: 600;
   text-align: right;
-  word-break: break-word;
+  overflow-wrap: anywhere;
   user-select: text;
 }
 
@@ -268,6 +302,11 @@ body {
   justify-content: flex-end;
   gap: 0.8rem;
   margin-top: 1.8rem;
+  position: sticky;
+  z-index: 2;
+  bottom: 0;
+  padding: 0.8rem 0 max(0.8rem, env(safe-area-inset-bottom));
+  background: linear-gradient(to bottom, transparent, var(--bg) 25%);
 }
 
 .btn {
@@ -305,6 +344,95 @@ body {
   border-color: var(--text-dim);
 }
 
+/* ---------- Remappage des périphériques ---------- */
+
+.remap-intro {
+  margin: 0 0 1.2rem;
+  color: var(--text-dim);
+  font-size: 0.92rem;
+}
+
+.remap-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.remap-item {
+  display: grid;
+  gap: 0.45rem;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.9rem 1rem;
+}
+
+.remap-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.remap-item-title {
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.remap-badge {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  background: var(--bg-softer);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.15rem 0.6rem;
+}
+
+.remap-usage {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.remap-choice {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+  margin-top: 0.25rem;
+}
+
+.remap-choice .label {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  flex-shrink: 0;
+}
+
+.remap-select {
+  flex: 1;
+  min-width: 220px;
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-softer);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.5rem 0.7rem;
+  cursor: pointer;
+}
+
+.remap-select:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.remap-select:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 65%, white);
+  outline-offset: 2px;
+}
+
 /* ---------- Progression ---------- */
 
 .progress-track {
@@ -326,9 +454,7 @@ body {
 .progress-message {
   color: var(--text-dim);
   font-size: 0.9rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 
 /* ---------- Terminé ---------- */
@@ -344,4 +470,83 @@ body {
   border: 1px solid rgba(62, 207, 142, 0.35);
   border-radius: 50%;
   margin-bottom: 0.6rem;
+}
+
+/* ---------- Fenêtres compactes ---------- */
+
+@media (max-height: 700px) {
+  .app {
+    padding-top: 1rem;
+    padding-bottom: 1rem;
+  }
+
+  .app-header {
+    margin-bottom: 1rem;
+  }
+
+  .brand-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+  }
+
+  .card {
+    padding: 1.15rem;
+  }
+
+  .card-icon {
+    margin-bottom: 0.65rem;
+  }
+
+  .privacy-note,
+  .actions {
+    margin-top: 1rem;
+  }
+
+  .screen h2 {
+    margin-bottom: 0.8rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .app {
+    padding-right: 1rem;
+    padding-left: 1rem;
+  }
+
+  .app-header {
+    align-items: flex-start;
+  }
+
+  .brand,
+  .obs-status {
+    width: 100%;
+  }
+
+  .obs-status {
+    max-width: none;
+    border-radius: 12px;
+  }
+
+  .summary-row {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .summary-row .label {
+    flex-shrink: 1;
+  }
+
+  .summary-row .value {
+    text-align: left;
+  }
+
+  .actions {
+    flex-direction: column-reverse;
+  }
+
+  .btn {
+    width: 100%;
+  }
 }
