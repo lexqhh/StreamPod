@@ -214,6 +214,13 @@ fn backup_puis_restore_round_trip() {
             .join("move-transition.dll"),
     )
     .unwrap(); // ... mais sans le plugin tiers
+    fs::remove_dir_all(
+        install_dst
+            .join("data")
+            .join("obs-plugins")
+            .join("move-transition"),
+    )
+    .unwrap(); // ... ni son dossier data
 
     std::env::set_var("OWBS_CONFIG_DIR", &config_dst);
     std::env::set_var("OWBS_ASSETS_DIR", &assets_dst);
@@ -223,7 +230,7 @@ fn backup_puis_restore_round_trip() {
     let result = restore::restore(&backup_file, &[], |_| {}).unwrap();
     assert_eq!(result.scene_collections, 1);
     assert_eq!(result.assets_restored, 1);
-    assert_eq!(result.plugins_status, "copied");
+    assert_eq!(result.plugins_status, "manual");
     assert!(result.previous_config_backup.is_none());
 
     // La config est en place.
@@ -248,18 +255,22 @@ fn backup_puis_restore_round_trip() {
         "le chemin d'asset n'a pas été réécrit : {scene_text}"
     );
 
-    // Le plugin tiers a été copié dans l'installation OBS de la machine 2.
-    assert!(install_dst
+    // Le plugin tiers n'est JAMAIS copié dans l'installation OBS de la
+    // machine 2, même à version majeure identique : les DLL d'une archive
+    // sont du code non fiable, elles sont seulement listées pour
+    // réinstallation manuelle.
+    assert!(!install_dst
         .join("obs-plugins")
         .join("64bit")
         .join("move-transition.dll")
-        .is_file());
-    assert!(install_dst
+        .exists());
+    assert!(!install_dst
         .join("data")
         .join("obs-plugins")
         .join("move-transition")
         .join("locale.ini")
-        .is_file());
+        .exists());
+    assert_eq!(result.plugins, vec!["move-transition".to_string()]);
 
     // Aucun secret dans la config restaurée.
     let service_text = fs::read_to_string(

@@ -52,7 +52,6 @@ interface RestorePreview {
   backup_file_size: number;
   obs_installed: boolean;
   installed_version: string | null;
-  plugins_compatible: boolean;
   config_exists: boolean;
   warnings: string[];
 }
@@ -62,6 +61,7 @@ interface RestoreSummary {
   profiles: number;
   assets_restored: number;
   assets_dir: string | null;
+  /** "manual" | "none" — les plugins ne sont jamais installés automatiquement. */
   plugins_status: string;
   plugins: string[];
   previous_config_backup: string | null;
@@ -515,20 +515,14 @@ async function runRestore() {
     const notes = $("done-notes");
     notes.replaceChildren();
     if (result.plugins.length > 0) {
-      if (result.plugins_status === "copied" || result.plugins_status === "copied_elevated") {
-        notes.append(
-          noteItem(`✔ ${result.plugins.length} plugin(s) installé(s) : ${result.plugins.join(", ")}`, "note"),
-        );
-      } else {
-        notes.append(
-          noteItem(
-            `Les plugins suivants n'ont pas pu être installés automatiquement — ` +
-              `réinstallez-les depuis obsproject.com/forum/list/plugins.35 : ` +
-              result.plugins.join(", "),
-            "warning",
-          ),
-        );
-      }
+      notes.append(
+        noteItem(
+          `Par sécurité, les plugins ne sont jamais installés automatiquement. ` +
+            `Réinstallez-les depuis obsproject.com/forum/list/plugins.35 : ` +
+            result.plugins.join(", "),
+          "warning",
+        ),
+      );
     }
     if (result.sources_remappees > 0) {
       notes.append(

@@ -59,8 +59,6 @@ pub struct RestorePreview {
     pub backup_file_size: u64,
     pub obs_installed: bool,
     pub installed_version: Option<String>,
-    /// Les plugins peuvent-ils être copiés automatiquement ?
-    pub plugins_compatible: bool,
     /// Une configuration OBS existe déjà et sera remplacée (après copie de
     /// sécurité automatique).
     pub config_exists: bool,
@@ -73,7 +71,10 @@ pub struct RestoreSummary {
     pub profiles: usize,
     pub assets_restored: usize,
     pub assets_dir: Option<String>,
-    /// "copied" | "copied_elevated" | "manual" | "none"
+    /// "manual" (plugins listés pour réinstallation manuelle) | "none".
+    /// Les DLL ne sont JAMAIS installées automatiquement : une archive est
+    /// une donnée non fiable, et une DLL déposée dans le dossier d'OBS est
+    /// du code exécuté au prochain lancement.
     pub plugins_status: String,
     pub plugins: Vec<String>,
     /// Copie de sécurité de l'ancienne configuration, le cas échéant.
@@ -105,11 +106,6 @@ fn read_manifest(archive: &mut ZipArchive<File>) -> Result<Manifest, String> {
     serde_json::from_str(&text).map_err(|e| err("Manifest illisible", e))
 }
 
-/// Version majeure ("31.0.2" → "31").
-fn major(version: &str) -> &str {
-    version.split('.').next().unwrap_or(version)
-}
-
 /// Lit une sauvegarde et prépare le résumé avant restauration.
 pub fn preview(backup_path: &Path) -> Result<RestorePreview, String> {
     let mut archive = open_archive(backup_path)?;
@@ -118,13 +114,6 @@ pub fn preview(backup_path: &Path) -> Result<RestorePreview, String> {
     let install_dir = obs::install_dir();
     let installed_version = obs::installed_version();
     let obs_installed = install_dir.is_some();
-
-    let plugins_compatible = match (&manifest.obs_version, &installed_version) {
-        (Some(a), Some(b)) => major(a) == major(b),
-        // Version inconnue d'un côté ou de l'autre : on ne copie pas les
-        // DLL automatiquement, par prudence.
-        _ => false,
-    };
 
     let config_exists = obs::config_dir().is_some();
 
@@ -136,13 +125,11 @@ pub fn preview(backup_path: &Path) -> Result<RestorePreview, String> {
                 .to_string(),
         );
     }
-    if !manifest.plugins.is_empty() && !plugins_compatible {
+    if !manifest.plugins.is_empty() {
         warnings.push(format!(
-            "La sauvegarde vient d'OBS {} et cet ordinateur a OBS {}. Les {} plugin(s) ne \
-             seront pas copiés automatiquement : ils seront listés pour une réinstallation \
-             manuelle.",
-            manifest.obs_version.as_deref().unwrap_or("?"),
-            installed_version.as_deref().unwrap_or("?"),
+            "Par sécurité, les {} plugin(s) de la sauvegarde ne seront pas installés \
+             automatiquement : ils vous seront listés à la fin pour une réinstallation \
+             depuis leurs sites officiels.",
             manifest.plugins.len()
         ));
     }
@@ -159,7 +146,6 @@ pub fn preview(backup_path: &Path) -> Result<RestorePreview, String> {
         backup_file_size: backup_path.metadata().map(|m| m.len()).unwrap_or(0),
         obs_installed,
         installed_version,
-        plugins_compatible,
         config_exists,
         warnings,
     })
@@ -183,51 +169,6 @@ fn extract_entry(
     std::io::copy(&mut entry, &mut out)
         .map_err(|e| err(&format!("Extraction vers {}", dest.display()), e))?;
     Ok(())
-}
-
-/// Copie récursive (pour les plugins).
-fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(dst)?;
-    for entry in walkdir::WalkDir::new(src) {
-        let entry = entry.map_err(std::io::Error::other)?;
-        let rel = entry.path().strip_prefix(src).map_err(std::io::Error::other)?;
-        let target = dst.join(rel);
-        if entry.file_type().is_dir() {
-            std::fs::create_dir_all(&target)?;
-        } else if entry.file_type().is_file() {
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::copy(entry.path(), &target)?;
-        }
-    }
-    Ok(())
-}
-
-/// Copie les plugins avec élévation (UAC) via PowerShell, quand l'écriture
-/// directe dans Program Files est refusée.
-fn copy_plugins_elevated(staging: &Path, install_dir: &Path) -> Result<(), String> {
-    let script = format!(
-        "Copy-Item -Path '{}\\*' -Destination '{}' -Recurse -Force",
-        staging.display(),
-        install_dir.display()
-    );
-    let status = std::process::Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            &format!(
-                "Start-Process -FilePath powershell -Verb RunAs -Wait -WindowStyle Hidden \
-                 -ArgumentList '-NoProfile','-Command',\"{script}\""
-            ),
-        ])
-        .status()
-        .map_err(|e| err("Lancement de la copie avec droits administrateur", e))?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err("La copie avec droits administrateur a été refusée ou a échoué.".to_string())
-    }
 }
 
 /// Bascule la nouvelle configuration (`tmp`) à la place de l'ancienne
@@ -368,13 +309,19 @@ pub fn restore(
 
     let total_entries = archive.len() as u64;
     let mut assets_restored = 0usize;
-    let mut plugin_staging: Option<PathBuf> = None;
 
     // Politique d'extraction : une entrée hors des préfixes connus (config/,
-    // assets/ du manifest, plugins/64bit/, plugins/data/) est ignorée sans
-    // erreur — compatibilité ascendante avec de futurs formats, rien n'est
-    // écrit. En revanche, un chemin suspect SOUS un préfixe connu fait
-    // échouer toute la restauration (zip slip).
+    // assets/ du manifest) est ignorée sans erreur — compatibilité
+    // ascendante avec de futurs formats, rien n'est écrit. En revanche, un
+    // chemin suspect SOUS un préfixe connu fait échouer toute la
+    // restauration (zip slip).
+    //
+    // Les entrées plugins/ ne sont JAMAIS extraites : une DLL écrite dans le
+    // dossier d'OBS (même via un dossier de transit) serait du code exécuté
+    // au prochain lancement, et le manifest qui prétend la rendre
+    // « compatible » est écrit par l'auteur de l'archive. Les plugins sont
+    // seulement listés (manifest.plugins) pour réinstallation manuelle
+    // depuis leurs sites officiels.
     for i in 0..archive.len() {
         let (name, is_dir) = {
             let entry = archive.by_index(i).map_err(|e| err("Lecture de l'archive", e))?;
@@ -393,21 +340,6 @@ pub fn restore(
                 extract_entry(&mut archive, i, dest)?;
                 assets_restored += 1;
             }
-        } else if let Some(rel) = name.strip_prefix("plugins/") {
-            // Extraits d'abord vers un dossier de transit ; copiés vers le
-            // dossier d'OBS à l'étape suivante.
-            let staging = plugin_staging
-                .get_or_insert_with(|| std::env::temp_dir().join(format!("owbs-plugins-{stamp}")));
-            // plugins/64bit/x.dll → obs-plugins/64bit/x.dll
-            // plugins/data/<stem>/... → data/obs-plugins/<stem>/...
-            let dest = if let Some(r) = rel.strip_prefix("64bit/") {
-                chemin_relatif_sur(&staging.join("obs-plugins").join("64bit"), r)?
-            } else if let Some(r) = rel.strip_prefix("data/") {
-                chemin_relatif_sur(&staging.join("data").join("obs-plugins"), r)?
-            } else {
-                continue;
-            };
-            extract_entry(&mut archive, i, &dest)?;
         }
     }
 
@@ -465,35 +397,14 @@ pub fn restore(
     let bak = parent.join(format!("obs-studio.bak-{stamp}"));
     let previous_backup = basculer_config(&target_config, &tmp_config, &bak)?;
 
-    // 6. Plugins.
-    let mut plugins_status = "none".to_string();
-    if !manifest.plugins.is_empty() {
-        report("plugins", "Installation des plugins…".into(), 0, 1);
-        let install_dir = obs::install_dir();
-        let installed_version = obs::installed_version();
-        let compatible = match (&manifest.obs_version, &installed_version) {
-            (Some(a), Some(b)) => major(a) == major(b),
-            _ => false,
-        };
-        plugins_status = match (install_dir, compatible, plugin_staging.as_ref()) {
-            (Some(install), true, Some(staging)) => {
-                match copy_dir_recursive(staging, &install) {
-                    Ok(()) => "copied".to_string(),
-                    Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
-                        match copy_plugins_elevated(staging, &install) {
-                            Ok(()) => "copied_elevated".to_string(),
-                            Err(_) => "manual".to_string(),
-                        }
-                    }
-                    Err(_) => "manual".to_string(),
-                }
-            }
-            _ => "manual".to_string(),
-        };
-    }
-    if let Some(staging) = plugin_staging {
-        let _ = std::fs::remove_dir_all(staging);
-    }
+    // 6. Plugins : jamais installés automatiquement (voir la politique
+    //    d'extraction ci-dessus), seulement listés pour réinstallation
+    //    manuelle.
+    let plugins_status = if manifest.plugins.is_empty() {
+        "none".to_string()
+    } else {
+        "manual".to_string()
+    };
 
     Ok(RestoreSummary {
         scene_collections: manifest.scene_collections.len(),

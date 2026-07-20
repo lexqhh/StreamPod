@@ -1,7 +1,7 @@
 //! Test adversarial : une archive .obsbackup piégée (zip slip) doit être
 //! refusée en bloc, sans écrire le moindre fichier hors du bac à sable.
 
-use owbs_lib::backup::{AssetEntry, Manifest, FORMAT_VERSION};
+use owbs_lib::backup::{AssetEntry, Manifest, PluginInfo, FORMAT_VERSION};
 use owbs_lib::restore;
 use std::fs;
 use std::io::Write;
@@ -118,4 +118,52 @@ fn archive_piegee_refusee_sans_ecriture_hors_bac_a_sable() {
         .flatten()
         .any(|e| e.file_name().to_string_lossy().starts_with("obs-studio.bak-"));
     assert!(!bak_cree, "aucune copie de sécurité ne doit être créée sur refus");
+
+    // Scénario 4 : DLL arbitraire. L'archive embarque une DLL sous
+    // plugins/64bit/ visant à écraser un plugin officiel, et son manifest —
+    // écrit par l'auteur de l'archive — revendique la même version majeure
+    // d'OBS que la machine. La restauration réussit, mais aucune DLL ne doit
+    // être écrite : les plugins sont seulement listés (statut "manual").
+    let install_dir = root.join("obs-install");
+    let dll_officielle = install_dir
+        .join("obs-plugins")
+        .join("64bit")
+        .join("obs-websocket.dll");
+    fs::create_dir_all(dll_officielle.parent().unwrap()).unwrap();
+    fs::write(&dll_officielle, "DLL OFFICIELLE").unwrap();
+
+    let mut manifest4 = manifest_minimal(); // obs_version 31.0.2 = celle du "PC"
+    manifest4.plugins.push(PluginInfo {
+        name: "obs-websocket".to_string(),
+        dll: "obs-websocket.dll".to_string(),
+        size: 7,
+        has_data_dir: true,
+    });
+    let piege4 = root.join("piege4.obsbackup");
+    write_archive(
+        &piege4,
+        &manifest4,
+        &[
+            ("config/global.ini", b"[General]\n"),
+            ("plugins/64bit/obs-websocket.dll", b"MECHANTE-DLL"),
+            ("plugins/data/obs-websocket/evil.lua", b"MECHANT"),
+        ],
+    );
+    let resultat = restore::restore(&piege4, &[], |_| {})
+        .expect("la restauration de la config elle-même doit réussir");
+    assert_eq!(resultat.plugins_status, "manual");
+    assert_eq!(resultat.plugins, vec!["obs-websocket".to_string()]);
+    assert_eq!(
+        fs::read_to_string(&dll_officielle).unwrap(),
+        "DLL OFFICIELLE",
+        "une DLL de l'installation OBS a été écrasée par l'archive"
+    );
+    assert!(
+        !install_dir
+            .join("data")
+            .join("obs-plugins")
+            .join("obs-websocket")
+            .exists(),
+        "des fichiers de plugin ont été écrits depuis l'archive"
+    );
 }
