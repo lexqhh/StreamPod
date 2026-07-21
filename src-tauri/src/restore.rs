@@ -234,6 +234,61 @@ fn basculer_config_avec(
     Ok(previous_backup)
 }
 
+/// Destination d'un asset : extrait d'abord dans un dossier de transit propre
+/// à cette restauration, puis déplacé vers son emplacement définitif une fois
+/// toute la préparation réussie — le dossier d'assets définitif n'est jamais
+/// touché par une restauration qui échoue en cours de route.
+struct DestinationAsset {
+    transit: PathBuf,
+    finale: PathBuf,
+}
+
+/// Déplace les assets du dossier de transit vers leur emplacement définitif.
+/// Les fichiers créés (absents auparavant) sont ajoutés à `installes` au fil
+/// de l'eau, pour pouvoir les retirer si la suite de la restauration échoue.
+///
+/// En cas de collision (un asset du même nom au même index existe déjà, par
+/// exemple laissé par une restauration précédente), le fichier est écrasé —
+/// même comportement qu'avant — et n'est pas retiré en cas de rollback.
+fn installer_assets(
+    destinations: &BTreeMap<String, DestinationAsset>,
+    installes: &mut Vec<PathBuf>,
+) -> Result<(), String> {
+    for dest in destinations.values() {
+        // Entrée listée au manifest mais absente de l'archive : rien à faire.
+        if !dest.transit.is_file() {
+            continue;
+        }
+        if let Some(parent) = dest.finale.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| err(&format!("Création du dossier {}", parent.display()), e))?;
+        }
+        let existait = dest.finale.exists();
+        if existait {
+            std::fs::remove_file(&dest.finale)
+                .map_err(|e| err(&format!("Remplacement de {}", dest.finale.display()), e))?;
+        }
+        std::fs::rename(&dest.transit, &dest.finale)
+            .map_err(|e| err(&format!("Mise en place de {}", dest.finale.display()), e))?;
+        if !existait {
+            installes.push(dest.finale.clone());
+        }
+    }
+    Ok(())
+}
+
+/// Retire (best effort) les assets installés par une restauration qui a
+/// échoué ensuite, ainsi que leurs sous-dossiers devenus vides.
+fn retirer_assets(installes: &[PathBuf]) {
+    for fichier in installes {
+        let _ = std::fs::remove_file(fichier);
+        if let Some(parent) = fichier.parent() {
+            // Ne supprime le dossier que s'il est vide.
+            let _ = std::fs::remove_dir(parent);
+        }
+    }
+}
+
 /// Restaure une sauvegarde .obsbackup en appliquant les choix de remappage
 /// matériel confirmés par l'utilisateur (`choix` peut être vide).
 pub fn restore(
@@ -286,13 +341,24 @@ pub fn restore(
     // 1. Extraction de la configuration vers un dossier temporaire (jamais
     //    directement sur la config existante : la bascule ne se fait qu'une
     //    fois l'extraction terminée, avec rollback en cas d'échec).
-    // 2. Extraction des assets vers le dossier d'assets.
+    // 2. Extraction des assets vers un dossier de transit voisin du dossier
+    //    définitif (même volume, donc mise en place par simple rename) :
+    //    le dossier d'assets définitif n'est touché qu'une fois toute la
+    //    préparation réussie.
     let assets_dir = obs::assets_target_dir();
-    let mut asset_dest_by_archive_path: BTreeMap<String, PathBuf> = BTreeMap::new();
+    let mut asset_dest_by_archive_path: BTreeMap<String, DestinationAsset> = BTreeMap::new();
+    let mut tmp_assets: Option<PathBuf> = None;
     if !manifest.assets.is_empty() {
         let assets_dir = assets_dir
             .as_ref()
             .ok_or("Impossible de déterminer le dossier Documents pour les assets.")?;
+        let transit = assets_dir.with_file_name(format!(
+            "{}.tmp-{stamp}",
+            assets_dir
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+        ));
         for asset in &manifest.assets {
             // archive_path = assets/<n>/<nom> → <assets_dir>/<n>/<nom>.
             // Chemin lu depuis le manifest, donc contrôlé par l'auteur de
@@ -302,13 +368,29 @@ pub fn restore(
                 .archive_path
                 .strip_prefix("assets/")
                 .ok_or_else(|| chemin_suspect(&asset.archive_path))?;
-            asset_dest_by_archive_path
-                .insert(asset.archive_path.clone(), chemin_relatif_sur(assets_dir, rel)?);
+            asset_dest_by_archive_path.insert(
+                asset.archive_path.clone(),
+                DestinationAsset {
+                    transit: chemin_relatif_sur(&transit, rel)?,
+                    finale: chemin_relatif_sur(assets_dir, rel)?,
+                },
+            );
         }
+        tmp_assets = Some(transit);
     }
 
+    // Toute erreur entre l'extraction et la bascule supprime les deux
+    // dossiers temporaires : ni configuration partielle, ni assets de
+    // transit orphelins — la configuration active et le dossier d'assets
+    // définitif n'ont pas bougé.
+    let nettoyer_temporaires = || {
+        let _ = std::fs::remove_dir_all(&tmp_config);
+        if let Some(transit) = &tmp_assets {
+            let _ = std::fs::remove_dir_all(transit);
+        }
+    };
+
     let total_entries = archive.len() as u64;
-    let mut assets_restored = 0usize;
 
     // Politique d'extraction : une entrée hors des préfixes connus (config/,
     // assets/ du manifest) est ignorée sans erreur — compatibilité
@@ -322,82 +404,110 @@ pub fn restore(
     // « compatible » est écrit par l'auteur de l'archive. Les plugins sont
     // seulement listés (manifest.plugins) pour réinstallation manuelle
     // depuis leurs sites officiels.
-    for i in 0..archive.len() {
-        let (name, is_dir) = {
-            let entry = archive.by_index(i).map_err(|e| err("Lecture de l'archive", e))?;
-            (entry.name().to_string(), entry.is_dir())
-        };
-        if is_dir {
-            continue;
-        }
-        report("extract", format!("Extraction : {name}"), i as u64, total_entries);
-
-        if let Some(rel) = name.strip_prefix("config/") {
-            let dest = chemin_relatif_sur(&tmp_config, rel)?;
-            extract_entry(&mut archive, i, &dest)?;
-        } else if name.starts_with("assets/") {
-            if let Some(dest) = asset_dest_by_archive_path.get(&name) {
-                extract_entry(&mut archive, i, dest)?;
-                assets_restored += 1;
-            }
-        }
-    }
-
-    // 3. Réécriture des chemins d'assets dans les scènes extraites.
-    report("rewrite", "Mise à jour des chemins d'assets…".into(), 0, 1);
-    let mut mapping: BTreeMap<String, String> = BTreeMap::new();
-    for (original_normalized, archive_path) in asset_mapping_from_manifest(&manifest) {
-        if let Some(dest) = asset_dest_by_archive_path.get(&archive_path) {
-            mapping.insert(
-                original_normalized,
-                dest.to_string_lossy().replace('\\', "/"),
-            );
-        }
-    }
     let scenes_dir = tmp_config.join("basic").join("scenes");
-    if scenes_dir.is_dir() && !mapping.is_empty() {
-        for entry in std::fs::read_dir(&scenes_dir)
-            .map_err(|e| err("Lecture des scènes restaurées", e))?
-            .flatten()
-        {
-            let path = entry.path();
-            if !path
-                .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("json"))
-            {
+    let preparation = (|| -> Result<(usize, usize), String> {
+        let mut assets_restored = 0usize;
+        for i in 0..archive.len() {
+            let (name, is_dir) = {
+                let entry = archive.by_index(i).map_err(|e| err("Lecture de l'archive", e))?;
+                (entry.name().to_string(), entry.is_dir())
+            };
+            if is_dir {
                 continue;
             }
-            let text = std::fs::read_to_string(&path)
-                .map_err(|e| err(&format!("Lecture de {}", path.display()), e))?;
-            let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&text) else {
-                continue;
-            };
-            scenes::rewrite_asset_paths(&mut value, &mapping);
-            std::fs::write(&path, serde_json::to_string_pretty(&value).unwrap())
-                .map_err(|e| err(&format!("Écriture de {}", path.display()), e))?;
+            report("extract", format!("Extraction : {name}"), i as u64, total_entries);
+
+            if let Some(rel) = name.strip_prefix("config/") {
+                let dest = chemin_relatif_sur(&tmp_config, rel)?;
+                extract_entry(&mut archive, i, &dest)?;
+            } else if name.starts_with("assets/") {
+                if let Some(dest) = asset_dest_by_archive_path.get(&name) {
+                    extract_entry(&mut archive, i, &dest.transit)?;
+                    assets_restored += 1;
+                }
+            }
+        }
+
+        // 3. Réécriture des chemins d'assets dans les scènes extraites, avec
+        //    les chemins définitifs (les assets n'y seront déplacés qu'à
+        //    l'étape 5).
+        report("rewrite", "Mise à jour des chemins d'assets…".into(), 0, 1);
+        let mut mapping: BTreeMap<String, String> = BTreeMap::new();
+        for (original_normalized, archive_path) in asset_mapping_from_manifest(&manifest) {
+            if let Some(dest) = asset_dest_by_archive_path.get(&archive_path) {
+                mapping.insert(
+                    original_normalized,
+                    dest.finale.to_string_lossy().replace('\\', "/"),
+                );
+            }
+        }
+        if scenes_dir.is_dir() && !mapping.is_empty() {
+            for entry in std::fs::read_dir(&scenes_dir)
+                .map_err(|e| err("Lecture des scènes restaurées", e))?
+                .flatten()
+            {
+                let path = entry.path();
+                if !path
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+                {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path)
+                    .map_err(|e| err(&format!("Lecture de {}", path.display()), e))?;
+                let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&text) else {
+                    continue;
+                };
+                scenes::rewrite_asset_paths(&mut value, &mapping);
+                std::fs::write(&path, serde_json::to_string_pretty(&value).unwrap())
+                    .map_err(|e| err(&format!("Écriture de {}", path.display()), e))?;
+            }
+        }
+
+        // 4. Application des choix de remappage matériel dans la copie
+        //    temporaire, avant la bascule.
+        let mut sources_remappees = 0;
+        if !choix_valides.is_empty() {
+            report("remap", "Remplacement des périphériques…".into(), 0, 1);
+            sources_remappees = remap::appliquer(&scenes_dir, &choix_valides)?;
+        }
+        Ok((assets_restored, sources_remappees))
+    })();
+    let (assets_restored, sources_remappees) = match preparation {
+        Ok(compteurs) => compteurs,
+        Err(e) => {
+            nettoyer_temporaires();
+            return Err(e);
+        }
+    };
+
+    // 5. Mise en place des assets, avant la bascule : en cas d'échec, les
+    //    assets déjà déplacés sont retirés et la configuration active n'a
+    //    pas bougé.
+    let mut assets_installes: Vec<PathBuf> = Vec::new();
+    if tmp_assets.is_some() {
+        report("assets", "Mise en place des assets…".into(), 0, 1);
+        if let Err(e) = installer_assets(&asset_dest_by_archive_path, &mut assets_installes) {
+            retirer_assets(&assets_installes);
+            nettoyer_temporaires();
+            return Err(e);
         }
     }
-
-    // 4. Application des choix de remappage matériel dans la copie
-    //    temporaire, avant la bascule. En cas d'échec, l'extraction
-    //    temporaire est supprimée : jamais de configuration partiellement
-    //    installée, la configuration active n'a pas bougé.
-    let mut sources_remappees = 0;
-    if !choix_valides.is_empty() {
-        report("remap", "Remplacement des périphériques…".into(), 0, 1);
-        sources_remappees = remap::appliquer(&scenes_dir, &choix_valides).inspect_err(|_| {
-            let _ = std::fs::remove_dir_all(&tmp_config);
-        })?;
+    if let Some(transit) = &tmp_assets {
+        // Le transit ne contient plus que des dossiers vides.
+        let _ = std::fs::remove_dir_all(transit);
     }
 
-    // 5. Bascule avec rollback : l'ancienne config devient une copie de
+    // 6. Bascule avec rollback : l'ancienne config devient une copie de
     //    sécurité, la nouvelle prend sa place ; en cas d'échec, l'ancienne
-    //    configuration est remise en place automatiquement.
+    //    configuration est remise en place automatiquement et les assets
+    //    installés à l'étape 5 sont retirés.
     report("swap", "Mise en place de la configuration…".into(), 0, 1);
     let bak = parent.join(format!("obs-studio.bak-{stamp}"));
-    let previous_backup = basculer_config(&target_config, &tmp_config, &bak)?;
+    let previous_backup = basculer_config(&target_config, &tmp_config, &bak)
+        .inspect_err(|_| retirer_assets(&assets_installes))?;
 
-    // 6. Plugins : jamais installés automatiquement (voir la politique
+    // 7. Plugins : jamais installés automatiquement (voir la politique
     //    d'extraction ci-dessus), seulement listés pour réinstallation
     //    manuelle.
     let plugins_status = if manifest.plugins.is_empty() {
@@ -421,7 +531,10 @@ pub fn restore(
 
 #[cfg(test)]
 mod tests {
-    use super::{basculer_config, chemin_relatif_sur};
+    use super::{
+        basculer_config, chemin_relatif_sur, installer_assets, retirer_assets, DestinationAsset,
+    };
+    use std::collections::BTreeMap;
     use std::path::Path;
 
     /// Prépare un tempdir avec un dossier tmp contenant un fichier marqueur.
@@ -536,6 +649,67 @@ mod tests {
         // La config d'origine survit dans le .bak, le tmp n'est pas supprimé.
         assert!(bak.join("ancienne.txt").is_file());
         assert!(tmp.join("nouvelle.txt").is_file());
+    }
+
+    #[test]
+    fn installation_des_assets_deplace_et_ne_liste_que_les_nouveaux() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let transit = dir.path().join("OBS-Backup-Assets.tmp-test");
+        let finale = dir.path().join("OBS-Backup-Assets");
+        std::fs::create_dir_all(transit.join("0")).unwrap();
+        std::fs::create_dir_all(transit.join("1")).unwrap();
+        std::fs::write(transit.join("0").join("overlay.png"), "nouveau 0").unwrap();
+        std::fs::write(transit.join("1").join("alerte.mp3"), "nouveau 1").unwrap();
+        // Collision : un asset au même index/nom existe déjà (restauration
+        // précédente) — il est écrasé et ne compte pas comme « nouveau ».
+        std::fs::create_dir_all(finale.join("0")).unwrap();
+        std::fs::write(finale.join("0").join("overlay.png"), "ancien").unwrap();
+
+        let mut destinations = BTreeMap::new();
+        for rel in ["0/overlay.png", "1/alerte.mp3"] {
+            destinations.insert(
+                format!("assets/{rel}"),
+                DestinationAsset {
+                    transit: chemin_relatif_sur(&transit, rel).unwrap(),
+                    finale: chemin_relatif_sur(&finale, rel).unwrap(),
+                },
+            );
+        }
+        let mut installes = Vec::new();
+        installer_assets(&destinations, &mut installes).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(finale.join("0").join("overlay.png")).unwrap(),
+            "nouveau 0"
+        );
+        assert_eq!(
+            std::fs::read_to_string(finale.join("1").join("alerte.mp3")).unwrap(),
+            "nouveau 1"
+        );
+        assert_eq!(installes, vec![finale.join("1").join("alerte.mp3")]);
+        assert!(!transit.join("0").join("overlay.png").exists());
+    }
+
+    #[test]
+    fn retrait_des_assets_supprime_fichiers_et_dossiers_vides() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let finale = dir.path().join("OBS-Backup-Assets");
+        std::fs::create_dir_all(finale.join("0")).unwrap();
+        std::fs::create_dir_all(finale.join("1")).unwrap();
+        std::fs::write(finale.join("0").join("overlay.png"), "installé").unwrap();
+        std::fs::write(finale.join("1").join("alerte.mp3"), "installé").unwrap();
+        // Un asset d'une restauration précédente cohabite dans le dossier 1 :
+        // le fichier installé est retiré mais le dossier non vide reste.
+        std::fs::write(finale.join("1").join("autre.png"), "préexistant").unwrap();
+
+        retirer_assets(&[
+            finale.join("0").join("overlay.png"),
+            finale.join("1").join("alerte.mp3"),
+        ]);
+
+        assert!(!finale.join("0").exists(), "dossier vidé donc supprimé");
+        assert!(!finale.join("1").join("alerte.mp3").exists());
+        assert!(finale.join("1").join("autre.png").is_file());
     }
 
     #[test]
