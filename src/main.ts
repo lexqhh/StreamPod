@@ -213,6 +213,23 @@ async function refreshObsStatus(): Promise<ObsInfo | null> {
 
 /* ---------- Progression ---------- */
 
+// Doit rester identique à backup::MSG_ANNULATION côté Rust : c'est ainsi
+// qu'une annulation volontaire est distinguée d'une vraie erreur.
+const MSG_ANNULATION = "Opération annulée.";
+
+let annulationDemandee = false;
+
+/** Réinitialise l'écran de progression, bouton Annuler compris. */
+function resetProgress(title: string) {
+  annulationDemandee = false;
+  $("progress-title").textContent = title;
+  $("progress-bar").style.width = "0%";
+  $("progress-message").textContent = "Préparation…";
+  const btn = $<HTMLButtonElement>("btn-cancel-operation");
+  btn.disabled = false;
+  btn.classList.remove("hidden");
+}
+
 const STEP_LABELS: Record<string, string> = {
   scan: "Analyse",
   config: "Configuration",
@@ -228,9 +245,25 @@ listen<Progress>("owbs://progress", (event) => {
   const p = event.payload;
   const percent = p.total > 0 ? Math.min(100, (p.current / p.total) * 100) : 0;
   $("progress-bar").style.width = `${percent}%`;
+  // La bascule de configuration est le point de non-retour : l'annulation
+  // serait ignorée côté Rust, on retire donc le bouton.
+  if (p.step === "swap") {
+    $("btn-cancel-operation").classList.add("hidden");
+  }
+  if (annulationDemandee) {
+    return; // Ne pas écraser « Annulation en cours… ».
+  }
   const label = STEP_LABELS[p.step] ?? p.step;
   $("progress-message").textContent = `${label} — ${p.message}`;
 });
+
+function demanderAnnulation() {
+  annulationDemandee = true;
+  const btn = $<HTMLButtonElement>("btn-cancel-operation");
+  btn.disabled = true;
+  $("progress-message").textContent = "Annulation en cours…";
+  void invoke("cancel_operation");
+}
 
 /* ---------- Parcours : sauvegarde ---------- */
 
@@ -294,9 +327,7 @@ async function runBackup() {
   });
   if (!outputPath) return;
 
-  $("progress-title").textContent = "Sauvegarde en cours…";
-  $("progress-bar").style.width = "0%";
-  $("progress-message").textContent = "Préparation…";
+  resetProgress("Sauvegarde en cours…");
   show("progress");
 
   try {
@@ -322,7 +353,10 @@ async function runBackup() {
     show("done");
   } catch (e) {
     show("home");
-    showError(String(e));
+    // Annulation volontaire : retour à l'accueil sans bandeau d'erreur.
+    if (String(e) !== MSG_ANNULATION) {
+      showError(String(e));
+    }
   }
 }
 
@@ -502,9 +536,7 @@ function collectRemapChoices(): RemapChoice[] {
 async function runRestore() {
   if (!selectedBackupPath) return;
 
-  $("progress-title").textContent = "Restauration en cours…";
-  $("progress-bar").style.width = "0%";
-  $("progress-message").textContent = "Préparation…";
+  resetProgress("Restauration en cours…");
   show("progress");
 
   try {
@@ -580,7 +612,10 @@ async function runRestore() {
     show("done");
   } catch (e) {
     show("home");
-    showError(String(e));
+    // Annulation volontaire : retour à l'accueil sans bandeau d'erreur.
+    if (String(e) !== MSG_ANNULATION) {
+      showError(String(e));
+    }
   }
 }
 
@@ -596,6 +631,7 @@ window.addEventListener("DOMContentLoaded", () => {
     void runRestore();
   });
   $("error-close").addEventListener("click", hideError);
+  $("btn-cancel-operation").addEventListener("click", demanderAnnulation);
 
   document.querySelectorAll<HTMLElement>("[data-goto]").forEach((el) => {
     el.addEventListener("click", () => {

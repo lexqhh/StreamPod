@@ -36,7 +36,7 @@ fn write_archive(path: &Path, manifest: &Manifest, entries: &[(&str, &[u8])]) {
 }
 
 fn restauration_refusee(backup: &Path) {
-    let e = restore::restore(backup, &[], |_| {})
+    let e = restore::restore(backup, &[], |_| {}, || false)
         .expect_err("la restauration aurait dû être refusée");
     assert!(
         e.contains("Archive invalide ou malveillante"),
@@ -149,7 +149,7 @@ fn archive_piegee_refusee_sans_ecriture_hors_bac_a_sable() {
             ("plugins/data/obs-websocket/evil.lua", b"MECHANT"),
         ],
     );
-    let resultat = restore::restore(&piege4, &[], |_| {})
+    let resultat = restore::restore(&piege4, &[], |_| {}, || false)
         .expect("la restauration de la config elle-même doit réussir");
     assert_eq!(resultat.plugins_status, "manual");
     assert_eq!(resultat.plugins, vec!["obs-websocket".to_string()]);

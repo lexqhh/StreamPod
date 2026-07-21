@@ -1,6 +1,6 @@
 //! Pipeline de restauration : fichier .obsbackup → configuration OBS.
 
-use crate::backup::{asset_mapping_from_manifest, Manifest, Progress};
+use crate::backup::{asset_mapping_from_manifest, Manifest, Progress, MSG_ANNULATION};
 use crate::{devices, obs, remap, scenes};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -295,6 +295,7 @@ pub fn restore(
     backup_path: &Path,
     choix: &[remap::Choix],
     progress: impl Fn(Progress),
+    est_annule: impl Fn() -> bool,
 ) -> Result<RestoreSummary, String> {
     let report = |step: &str, message: String, current: u64, total: u64| {
         progress(Progress {
@@ -408,6 +409,9 @@ pub fn restore(
     let preparation = (|| -> Result<(usize, usize), String> {
         let mut assets_restored = 0usize;
         for i in 0..archive.len() {
+            if est_annule() {
+                return Err(MSG_ANNULATION.to_string());
+            }
             let (name, is_dir) = {
                 let entry = archive.by_index(i).map_err(|e| err("Lecture de l'archive", e))?;
                 (entry.name().to_string(), entry.is_dir())
@@ -480,6 +484,14 @@ pub fn restore(
             return Err(e);
         }
     };
+
+    // Dernier point d'annulation : au-delà, la restauration modifie le dossier
+    // d'assets définitif puis bascule la configuration — on va jusqu'au bout
+    // (garantie « jamais d'état sans config »), l'annulation est ignorée.
+    if est_annule() {
+        nettoyer_temporaires();
+        return Err(MSG_ANNULATION.to_string());
+    }
 
     // 5. Mise en place des assets, avant la bascule : en cas d'échec, les
     //    assets déjà déplacés sont retirés et la configuration active n'a

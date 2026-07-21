@@ -52,6 +52,7 @@ fn sauvegarde_reelle_puis_restauration_en_bac_a_sable() {
         version.clone(),
         &backup_file,
         |_| {},
+        || false,
     )
     .unwrap();
     println!(
@@ -89,7 +90,7 @@ fn sauvegarde_reelle_puis_restauration_en_bac_a_sable() {
         std::env::set_var("OWBS_OBS_VERSION", v);
     }
 
-    let result = restore::restore(&backup_file, &[], |_| {}).unwrap();
+    let result = restore::restore(&backup_file, &[], |_| {}, || false).unwrap();
     println!(
         "Restauration : {} scènes, {} assets, plugins = {} ({:?})",
         result.scene_collections, result.assets_restored, result.plugins_status, result.plugins

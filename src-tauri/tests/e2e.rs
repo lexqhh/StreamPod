@@ -140,6 +140,7 @@ fn backup_puis_restore_round_trip() {
                 warnings.lock().unwrap().push(p.message);
             }
         },
+        || false,
     )
     .unwrap();
     assert!(
@@ -173,7 +174,10 @@ fn backup_puis_restore_round_trip() {
         .map(|i| zip.by_index(i).unwrap().name().to_string())
         .collect();
     assert!(names.contains(&"manifest.json".to_string()));
-    assert!(names.contains(&"plugins/64bit/move-transition.dll".to_string()));
+    assert!(
+        !names.iter().any(|n| n.starts_with("plugins/")),
+        "les DLL de plugins ne sont plus archivées (jamais restaurées : seul le manifest liste les plugins)"
+    );
     assert!(!names.iter().any(|n| n.contains("win-capture")));
     assert!(!names.iter().any(|n| n.starts_with("config/logs/")));
     assert!(
@@ -267,7 +271,7 @@ fn backup_puis_restore_round_trip() {
     std::env::set_var("OWBS_INSTALL_DIR", &install_dst);
     std::env::set_var("OWBS_OBS_VERSION", "31.1.0"); // même version majeure
 
-    let result = restore::restore(&backup_file, &[], |_| {}).unwrap();
+    let result = restore::restore(&backup_file, &[], |_| {}, || false).unwrap();
     assert_eq!(result.scene_collections, 1);
     assert_eq!(result.assets_restored, 1);
     assert_eq!(result.plugins_status, "manual");
@@ -334,7 +338,7 @@ fn backup_puis_restore_round_trip() {
 
     // --- Seconde restauration : l'ancienne config est mise de côté ---
     std::thread::sleep(std::time::Duration::from_millis(1100)); // horodatage différent
-    let result2 = restore::restore(&backup_file, &[], |_| {}).unwrap();
+    let result2 = restore::restore(&backup_file, &[], |_| {}, || false).unwrap();
     let bak = result2.previous_config_backup.expect("copie de sécurité attendue");
     assert!(Path::new(&bak).join("global.ini").is_file());
 }
@@ -382,7 +386,7 @@ fn diagnostic_remappage_en_lecture_seule() {
 
     // --- Sauvegarde ---
     let backup_file = root.join("diag.obsbackup");
-    backup::create(&config_src, None, Some("32.1.2".to_string()), &backup_file, |_| {}).unwrap();
+    backup::create(&config_src, None, Some("32.1.2".to_string()), &backup_file, |_| {}, || false).unwrap();
     let archive_avant = fs::read(&backup_file).unwrap();
 
     // --- Inventaire cible factice : le micro « valide » existe encore, la
@@ -474,14 +478,14 @@ fn backup_refuse_destination_dans_le_dossier_de_config() {
         config_src.join("piege.obsbackup"),
         config_src.join("basic").join("piege.obsbackup"),
     ] {
-        let err = backup::create(&config_src, None, None, &destination, |_| {})
+        let err = backup::create(&config_src, None, None, &destination, |_| {}, || false)
             .expect_err("une destination dans le dossier de config doit être refusée");
         assert!(err.contains("dossier de configuration"), "{err}");
         assert!(!destination.exists(), "aucun fichier ne doit être créé");
     }
 
     // Une destination ailleurs reste acceptée.
-    backup::create(&config_src, None, None, &root.join("ok.obsbackup"), |_| {}).unwrap();
+    backup::create(&config_src, None, None, &root.join("ok.obsbackup"), |_| {}, || false).unwrap();
 }
 
 #[test]
@@ -506,7 +510,7 @@ fn backup_echoue_sans_laisser_de_fichier_incomplet() {
     .unwrap();
 
     let destination = root.join("echec.obsbackup");
-    backup::create(&config_src, None, None, &destination, |_| {})
+    backup::create(&config_src, None, None, &destination, |_| {}, || false)
         .expect_err("un service.json corrompu doit faire échouer la sauvegarde");
     assert!(
         !destination.exists(),

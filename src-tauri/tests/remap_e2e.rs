@@ -96,7 +96,7 @@ fn remappage_de_bout_en_bout() {
     let config_src = root.join("obs-studio-src");
     build_fake_config(&config_src);
     let backup_file = root.join("remap.obsbackup");
-    backup::create(&config_src, None, Some("32.0.0".to_string()), &backup_file, |_| {}).unwrap();
+    backup::create(&config_src, None, Some("32.0.0".to_string()), &backup_file, |_| {}, || false).unwrap();
     let archive_avant = fs::read(&backup_file).unwrap();
 
     // --- Machine cible : bac à sable + inventaire factice ---
@@ -140,7 +140,7 @@ fn remappage_de_bout_en_bout() {
         ancien_id: ANCIEN_MICRO.to_string(),
         nouveau_id: "{0.0.1.00000000}.{debranche-entre-temps}".to_string(),
     }];
-    let e = restore::restore(&backup_file, &mauvais, |_| {})
+    let e = restore::restore(&backup_file, &mauvais, |_| {}, || false)
         .expect_err("un périphérique absent de l'inventaire doit être refusé");
     assert!(e.contains("plus disponible"), "{e}");
     assert!(
@@ -156,7 +156,7 @@ fn remappage_de_bout_en_bout() {
         ancien_id: "default".to_string(),
         nouveau_id: NOUVEAU_MICRO.to_string(),
     }];
-    let e = restore::restore(&backup_file, &ancien_non_autorise, |_| {})
+    let e = restore::restore(&backup_file, &ancien_non_autorise, |_| {}, || false)
         .expect_err("une référence valide ne doit pas pouvoir être remappée");
     assert!(e.contains("ne fait pas partie"), "{e}");
     assert!(
@@ -165,7 +165,7 @@ fn remappage_de_bout_en_bout() {
     );
 
     // --- Restauration avec les bons choix ---
-    let result = restore::restore(&backup_file, &choix, |_| {}).unwrap();
+    let result = restore::restore(&backup_file, &choix, |_| {}, || false).unwrap();
     assert_eq!(result.scene_collections, 1);
     assert_eq!(result.sources_remappees, 3, "2 sources micro + 1 webcam");
 

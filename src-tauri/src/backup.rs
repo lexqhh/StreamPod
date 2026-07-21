@@ -14,6 +14,10 @@ use zip::{CompressionMethod, ZipWriter};
 /// Version du format de fichier .obsbackup.
 pub const FORMAT_VERSION: u32 = 1;
 
+/// Message renvoyé quand l'utilisateur annule une opération en cours.
+/// L'UI compare ce texte pour distinguer une annulation d'une vraie erreur.
+pub const MSG_ANNULATION: &str = "Opération annulée.";
+
 /// DLL livrées avec OBS Studio (ou runtime CEF) : tout autre .dll dans
 /// obs-plugins\64bit est considéré comme un plugin tiers.
 const OFFICIAL_PLUGIN_STEMS: &[&str] = &[
@@ -307,18 +311,23 @@ pub fn preview(
     })
 }
 
-/// Copie un fichier du disque vers l'archive ZIP.
+/// Copie un fichier du disque vers l'archive ZIP. `est_annule` est consulté
+/// entre chaque bloc de 512 Ko pour réagir vite même sur un gros média.
 fn zip_file_from_disk(
     zip: &mut ZipWriter<File>,
     src: &Path,
     archive_path: &str,
     options: SimpleFileOptions,
+    est_annule: &dyn Fn() -> bool,
 ) -> Result<(), String> {
     zip.start_file(archive_path, options)
         .map_err(|e| err("Écriture de l'archive", e))?;
     let mut f = File::open(src).map_err(|e| err(&format!("Lecture de {}", src.display()), e))?;
     let mut buf = [0u8; 1024 * 512];
     loop {
+        if est_annule() {
+            return Err(MSG_ANNULATION.to_string());
+        }
         let n = f
             .read(&mut buf)
             .map_err(|e| err(&format!("Lecture de {}", src.display()), e))?;
@@ -369,6 +378,7 @@ pub fn create(
     obs_version: Option<String>,
     output_path: &Path,
     progress: impl Fn(Progress),
+    est_annule: impl Fn() -> bool,
 ) -> Result<BackupSummary, String> {
     if !config_dir.is_dir() {
         return Err("Dossier de configuration OBS introuvable.".to_string());
@@ -448,6 +458,9 @@ pub fn create(
         .collect();
     let total_cfg = config_files.len() as u64;
     for (i, path) in config_files.iter().enumerate() {
+        if est_annule() {
+            return Err(MSG_ANNULATION.to_string());
+        }
         let rel = path
             .strip_prefix(config_dir)
             .map_err(|e| err("Chemin de configuration inattendu", e))?;
@@ -544,13 +557,16 @@ pub fn create(
                 total_cfg,
             );
         } else {
-            zip_file_from_disk(&mut zip, path, &archive_path, deflate)?;
+            zip_file_from_disk(&mut zip, path, &archive_path, deflate, &est_annule)?;
         }
     }
 
     // 3b. Assets.
     let total_assets = assets.len() as u64;
     for (i, asset) in assets.iter().enumerate() {
+        if est_annule() {
+            return Err(MSG_ANNULATION.to_string());
+        }
         report(
             "assets",
             format!("Assets : {}", asset.file_name),
@@ -562,50 +578,14 @@ pub fn create(
             Path::new(&asset.original_path),
             &asset.archive_path,
             stored,
+            &est_annule,
         )?;
     }
 
-    // 3c. Plugins tiers (DLL + dossier data).
-    if let Some(install) = install_dir {
-        let total_plugins = plugins.len() as u64;
-        for (i, plugin) in plugins.iter().enumerate() {
-            report(
-                "plugins",
-                format!("Plugins : {}", plugin.name),
-                i as u64,
-                total_plugins,
-            );
-            let dll_path = install.join("obs-plugins").join("64bit").join(&plugin.dll);
-            zip_file_from_disk(
-                &mut zip,
-                &dll_path,
-                &format!("plugins/64bit/{}", plugin.dll),
-                stored,
-            )?;
-            if plugin.has_data_dir {
-                let stem = plugin.name.to_lowercase();
-                let data_dir = install.join("data").join("obs-plugins").join(&stem);
-                for entry in WalkDir::new(&data_dir)
-                    .into_iter()
-                    .filter_map(|e| e.ok())
-                    .filter(|e| e.file_type().is_file())
-                {
-                    let rel = entry
-                        .path()
-                        .strip_prefix(&data_dir)
-                        .map_err(|e| err("Chemin de plugin inattendu", e))?
-                        .to_string_lossy()
-                        .replace('\\', "/");
-                    zip_file_from_disk(
-                        &mut zip,
-                        entry.path(),
-                        &format!("plugins/data/{stem}/{rel}"),
-                        stored,
-                    )?;
-                }
-            }
-        }
-    }
+    // 3c. Plugins tiers : jamais archivés. Les DLL ne sont de toute façon
+    // jamais restaurées (une archive est une donnée non fiable) — seule la
+    // liste du manifest sert, pour la réinstallation manuelle. Les archiver
+    // n'apportait que du poids mort de binaires opaques.
 
     // 3d. Manifest.
     report("finalize", "Finalisation…".into(), 0, 1);

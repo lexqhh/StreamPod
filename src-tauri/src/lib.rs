@@ -7,7 +7,13 @@ pub mod sanitize;
 pub mod scenes;
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Emitter;
+
+/// Demande d'annulation de l'opération longue en cours (sauvegarde ou
+/// restauration). Une seule opération à la fois côté UI, un simple flag
+/// global suffit ; remis à zéro au démarrage de chaque opération.
+static ANNULATION_DEMANDEE: AtomicBool = AtomicBool::new(false);
 
 const OBS_RUNNING_MSG: &str =
     "OBS est en cours d'exécution. Fermez OBS puis réessayez.";
@@ -18,6 +24,14 @@ const NO_CONFIG_MSG: &str =
 #[tauri::command]
 fn detect_obs() -> obs::ObsInfo {
     obs::detect()
+}
+
+/// Demande l'annulation de la sauvegarde ou restauration en cours. Coopératif :
+/// l'opération s'arrête à son prochain point de contrôle et nettoie ses
+/// fichiers temporaires ; ignoré une fois la bascule de configuration engagée.
+#[tauri::command]
+fn cancel_operation() {
+    ANNULATION_DEMANDEE.store(true, Ordering::Relaxed);
 }
 
 #[tauri::command]
@@ -39,6 +53,7 @@ async fn backup_create(
     app: tauri::AppHandle,
     output_path: String,
 ) -> Result<backup::BackupSummary, String> {
+    ANNULATION_DEMANDEE.store(false, Ordering::Relaxed);
     tauri::async_runtime::spawn_blocking(move || {
         if obs::is_running() {
             return Err(OBS_RUNNING_MSG.to_string());
@@ -52,6 +67,7 @@ async fn backup_create(
             |p| {
                 let _ = app.emit("owbs://progress", &p);
             },
+            || ANNULATION_DEMANDEE.load(Ordering::Relaxed),
         )
     })
     .await
@@ -86,10 +102,16 @@ async fn restore_run(
     backup_path: String,
     choix: Vec<remap::Choix>,
 ) -> Result<restore::RestoreSummary, String> {
+    ANNULATION_DEMANDEE.store(false, Ordering::Relaxed);
     tauri::async_runtime::spawn_blocking(move || {
-        restore::restore(Path::new(&backup_path), &choix, |p| {
-            let _ = app.emit("owbs://progress", &p);
-        })
+        restore::restore(
+            Path::new(&backup_path),
+            &choix,
+            |p| {
+                let _ = app.emit("owbs://progress", &p);
+            },
+            || ANNULATION_DEMANDEE.load(Ordering::Relaxed),
+        )
     })
     .await
     .map_err(|e| e.to_string())?
@@ -102,6 +124,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             detect_obs,
+            cancel_operation,
             backup_preview,
             backup_create,
             restore_preview,
