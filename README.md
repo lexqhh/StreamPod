@@ -79,6 +79,12 @@ avertissement.
 > incluent parfois un **token privé** (`.../overlay/<id>/<TOKEN>`). Ne partagez
 > donc un `.obsbackup` qu'avec des personnes de confiance.
 
+> [!NOTE]
+> Le manifeste et les scènes conservent les **chemins d'origine** de vos assets
+> (par exemple `C:\Users\<votre nom>\…`) : ils sont nécessaires pour réécrire
+> les scènes à la restauration. Un `.obsbackup` révèle donc le nom de votre
+> session Windows — à garder en tête si vous partagez le fichier.
+
 ## Utilisation
 
 L'interface tient en deux boutons.
@@ -94,6 +100,12 @@ remappage du matériel si nécessaire, et OwBS remet votre configuration en plac
 > OBS doit être **fermé** pendant une sauvegarde ou une restauration. OwBS
 > refuse d'agir tant qu'`obs64.exe` est en cours d'exécution, pour éviter toute
 > corruption des fichiers en cours d'écriture par OBS.
+
+Une opération longue (grosses collections d'assets) peut être **annulée** en
+cours de route : les fichiers temporaires sont nettoyés et rien n'est modifié.
+Pendant une restauration, l'annulation n'est plus possible une fois la mise en
+place de la configuration engagée — l'opération va alors jusqu'au bout pour ne
+jamais laisser OBS sans configuration.
 
 À propos des **plugins tiers** : la liste des plugins installés est enregistrée,
 mais leurs DLL ne sont **jamais** réinstallées depuis l'archive — une DLL issue
@@ -123,13 +135,13 @@ Un `.obsbackup` est une simple archive ZIP :
 ```
 manifest.json      # version du format, version d'OBS, plugins, table des assets
 config/            # copie assainie de %APPDATA%\obs-studio
-plugins/64bit/     # DLL des plugins tiers (jamais extraites à la restauration)
-plugins/data/      # données des plugins tiers (jamais extraites à la restauration)
 assets/<n>/        # fichiers médias référencés par les scènes
 ```
 
-Les entrées `plugins/` ne servent qu'à l'inventaire : la restauration ne les
-extrait jamais, seule la liste des plugins à réinstaller est présentée.
+Les plugins tiers ne sont **pas** embarqués : leurs DLL ne seraient de toute
+façon jamais réinstallées depuis l'archive, seule la liste du manifeste sert
+(réinstallation manuelle). Les archives plus anciennes qui contiennent un
+dossier `plugins/` restent restaurables : ces entrées sont simplement ignorées.
 
 ## Développement
 
