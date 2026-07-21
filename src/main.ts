@@ -27,6 +27,7 @@ interface BackupPreview {
   asset_count: number;
   asset_total_size: number;
   missing_assets: string[];
+  browser_sources: number;
 }
 
 interface BackupSummary {
@@ -257,6 +258,16 @@ async function startBackupFlow() {
     );
     const warnings = $("backup-warnings");
     warnings.replaceChildren();
+    if (preview.browser_sources > 0) {
+      warnings.append(
+        noteItem(
+          `${preview.browser_sources} source(s) navigateur (overlays StreamElements, ` +
+            `Streamlabs…) seront sauvegardées avec leur URL, qui peut contenir un ` +
+            `token privé. Ne partagez cette sauvegarde qu'avec des personnes de confiance.`,
+          "warning",
+        ),
+      );
+    }
     if (preview.missing_assets.length > 0) {
       warnings.append(
         noteItem(

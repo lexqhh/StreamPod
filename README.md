@@ -178,3 +178,4 @@ TypeScript** vanilla, en français.
 
 Le format des identifiants matériels d'OBS (audio WASAPI, vidéo DirectShow) est
 documenté dans [`docs/FORMATS-OBS.md`](docs/FORMATS-OBS.md).
+

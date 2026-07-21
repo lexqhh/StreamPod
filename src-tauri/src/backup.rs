@@ -96,6 +96,7 @@ pub struct BackupPreview {
     pub asset_count: usize,
     pub asset_total_size: u64,
     pub missing_assets: Vec<String>,
+    pub browser_sources: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -208,6 +209,32 @@ fn collect_path_like_strings(value: &serde_json::Value, out: &mut BTreeSet<Strin
     }
 }
 
+/// Compte les sources navigateur (overlays) dont l'URL pointe vers le web.
+/// Ces URL sont conservées telles quelles dans l'archive (OBS en a besoin pour
+/// réafficher l'overlay) et peuvent contenir un token privé
+/// (`…/overlay/<id>/<TOKEN>` chez StreamElements, Streamlabs…) : l'aperçu
+/// doit prévenir l'utilisateur avant qu'il ne partage le fichier.
+fn count_browser_sources(value: &serde_json::Value) -> usize {
+    match value {
+        serde_json::Value::Array(items) => items.iter().map(count_browser_sources).sum(),
+        serde_json::Value::Object(map) => {
+            let ici = usize::from(
+                map.get("id").and_then(|v| v.as_str()) == Some("browser_source")
+                    && map
+                        .get("settings")
+                        .and_then(|s| s.get("url"))
+                        .and_then(|u| u.as_str())
+                        .is_some_and(|u| {
+                            let u = u.to_ascii_lowercase();
+                            u.starts_with("http://") || u.starts_with("https://")
+                        }),
+            );
+            ici + map.values().map(count_browser_sources).sum::<usize>()
+        }
+        _ => 0,
+    }
+}
+
 /// Détecte les plugins tiers dans le dossier d'installation d'OBS.
 fn third_party_plugins(install_dir: &Path) -> Vec<PluginInfo> {
     let plugin_dir = install_dir.join("obs-plugins").join("64bit");
@@ -256,6 +283,12 @@ pub fn preview(
         .filter_map(|p| p.file_name().map(|s| s.to_string_lossy().into_owned()))
         .collect();
     let (assets, missing) = collect_assets(config_dir);
+    let browser_sources = scene_files(config_dir)
+        .iter()
+        .filter_map(|p| std::fs::read_to_string(p).ok())
+        .filter_map(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+        .map(|value| count_browser_sources(&value))
+        .sum();
     let asset_total_size = assets
         .iter()
         .map(|p| p.metadata().map(|m| m.len()).unwrap_or(0))
@@ -270,6 +303,7 @@ pub fn preview(
         asset_count: assets.len(),
         asset_total_size,
         missing_assets: missing,
+        browser_sources,
     })
 }
 
@@ -618,4 +652,42 @@ pub fn asset_mapping_from_manifest(manifest: &Manifest) -> BTreeMap<String, Stri
             )
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::count_browser_sources;
+    use serde_json::json;
+
+    #[test]
+    fn les_sources_navigateur_web_sont_comptees_meme_imbriquees() {
+        let scene = json!({
+            "sources": [
+                { "id": "browser_source",
+                  "settings": { "url": "https://streamelements.com/overlay/abc/TOKEN" } },
+                { "id": "browser_source",
+                  "settings": { "url": "HTTP://exemple.test/alertes" } },
+                { "id": "group", "settings": { "items": [
+                    { "id": "browser_source",
+                      "settings": { "url": "https://streamlabs.com/widget/xyz" } }
+                ] } },
+                { "id": "image_source", "settings": { "file": "C:/logo.png" } }
+            ]
+        });
+        assert_eq!(count_browser_sources(&scene), 3);
+    }
+
+    #[test]
+    fn les_sources_navigateur_sans_url_web_ne_sont_pas_comptees() {
+        let scene = json!({
+            "sources": [
+                { "id": "browser_source", "settings": { "is_local_file": true,
+                  "local_file": "C:/overlay/index.html", "url": "" } },
+                { "id": "browser_source", "settings": {} },
+                { "id": "browser_source" },
+                { "id": "text_gdiplus", "settings": { "url": "https://pas-un-navigateur.test" } }
+            ]
+        });
+        assert_eq!(count_browser_sources(&scene), 0);
+    }
 }
