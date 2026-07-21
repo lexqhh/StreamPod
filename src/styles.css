@@ -11,6 +11,10 @@
   --text-dim: #9aa0b5;
   --accent: #7c5cff;
   --accent-hover: #906fff;
+  /* Fond du bouton primaire : plus sombre que --accent pour garantir
+     un contraste AA (≥ 4,5:1) avec le texte blanc. */
+  --accent-btn: #6b46e8;
+  --accent-btn-hover: #7a56f2;
   --ok: #3ecf8e;
   --warn: #f5b83d;
   --danger: #ff5c6c;
@@ -320,12 +324,12 @@ button:focus-visible {
 }
 
 .btn.primary {
-  background: var(--accent);
+  background: var(--accent-btn);
   color: white;
 }
 
 .btn.primary:hover {
-  background: var(--accent-hover);
+  background: var(--accent-btn-hover);
 }
 
 .btn.primary:disabled {
@@ -548,5 +552,17 @@ button:focus-visible {
 
   .btn {
     width: 100%;
+  }
+}
+
+/* ---------- Accessibilité : mouvement réduit ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

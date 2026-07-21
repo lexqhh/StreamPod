@@ -21,7 +21,7 @@
         <div id="obs-status" class="obs-status">Recherche d'OBS…</div>
       </header>
 
-      <div id="error-banner" class="error-banner hidden">
+      <div id="error-banner" class="error-banner hidden" role="alert">
         <span id="error-text"></span>
         <button id="error-close" class="link-btn">Fermer</button>
       </div>
@@ -104,7 +104,9 @@
         <div class="progress-track">
           <div id="progress-bar" class="progress-bar"></div>
         </div>
-        <p id="progress-message" class="progress-message">Préparation…</p>
+        <p id="progress-message" class="progress-message" role="status" aria-live="polite">
+          Préparation…
+        </p>
       </section>
 
       <!-- Terminé -->

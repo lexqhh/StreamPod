@@ -130,6 +130,13 @@ function show(screen: Screen) {
     $(`screen-${s}`).classList.toggle("hidden", s !== screen);
   }
   window.scrollTo({ top: 0, left: 0 });
+  // Accessibilité : replacer le focus sur le titre du nouvel écran, sinon
+  // il reste sur un élément passé en display:none (clavier/lecteur d'écran perdus).
+  const titre = $(`screen-${screen}`).querySelector<HTMLElement>("h2");
+  if (titre) {
+    titre.tabIndex = -1;
+    titre.focus({ preventScroll: true });
+  }
 }
 
 function showError(message: string) {
