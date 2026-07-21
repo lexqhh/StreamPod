@@ -496,6 +496,19 @@ pub fn create(
                     );
                 }
             }
+        } else if rel_lower.starts_with("plugin_config/") {
+            // Liste blanche sous plugin_config/ : seuls les .json et .ini
+            // assainis (branches ci-dessus) sont archivés. Tout autre format
+            // (tokens.sqlite, credentials.yaml…) est une donnée opaque d'un
+            // plugin tiers pouvant contenir des secrets : jamais copié brut.
+            report(
+                "warning",
+                format!(
+                    "Fichier de configuration de plugin dans un format non pris en charge, exclu de la sauvegarde par précaution : {rel_str}"
+                ),
+                i as u64,
+                total_cfg,
+            );
         } else {
             zip_file_from_disk(&mut zip, path, &archive_path, deflate)?;
         }

@@ -9,6 +9,7 @@ use std::path::Path;
 const FAKE_STREAM_KEY: &str = "live_9999_ULTRASECRETSTREAMKEY";
 const FAKE_TOKEN: &str = "oauthTOKENsecret123";
 const FAKE_WS_PASSWORD: &str = "WSPASS_ULTRASECRET";
+const FAKE_DB_TOKEN: &str = "SQLITE_TOKEN_ULTRASECRET";
 
 /// Construit une fausse arborescence %APPDATA%\obs-studio.
 fn build_fake_config(root: &Path, asset: &Path) {
@@ -75,6 +76,22 @@ fn build_fake_config(root: &Path, asset: &Path) {
     )
     .unwrap();
 
+    // Plugin tiers stockant ses secrets dans des formats opaques : seuls les
+    // .json et .ini assainis sont archivés sous plugin_config/, le reste est
+    // exclu (liste blanche), jamais copié brut.
+    let exotique = root.join("plugin_config").join("plugin-exotique");
+    fs::create_dir_all(&exotique).unwrap();
+    fs::write(
+        exotique.join("tokens.sqlite"),
+        format!("SQLITE-BINAIRE {FAKE_DB_TOKEN}"),
+    )
+    .unwrap();
+    fs::write(
+        exotique.join("credentials.yaml"),
+        format!("token: {FAKE_DB_TOKEN}\n"),
+    )
+    .unwrap();
+
     let browser = root.join("plugin_config").join("obs-browser");
     fs::create_dir_all(&browser).unwrap();
     fs::write(browser.join("cookies.sqlite"), "COOKIE-TWITCH-SESSION").unwrap();
@@ -133,6 +150,14 @@ fn backup_puis_restore_round_trip() {
             .any(|m| m.contains("plugin-casse")),
         "l'exclusion du JSON de plugin invalide doit être signalée à l'utilisateur"
     );
+    assert!(
+        warnings
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|m| m.contains("plugin-exotique")),
+        "l'exclusion des fichiers de plugin au format non pris en charge doit être signalée"
+    );
     assert_eq!(summary.scene_collections, 1);
     assert_eq!(summary.profiles, 1);
     assert_eq!(summary.plugins, 1, "seul le plugin tiers doit être inclus");
@@ -164,6 +189,12 @@ fn backup_puis_restore_round_trip() {
         !names.iter().any(|n| n.contains("plugin-casse")),
         "un JSON de plugin invalide ne doit jamais être copié tel quel dans l'archive"
     );
+    assert!(
+        !names
+            .iter()
+            .any(|n| n.contains("plugin-exotique") || n.ends_with(".sqlite") || n.ends_with(".yaml")),
+        "sous plugin_config/, seuls les .json et .ini assainis sont archivés (liste blanche)"
+    );
 
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).unwrap();
@@ -183,6 +214,11 @@ fn backup_puis_restore_round_trip() {
         assert!(
             !text.contains(FAKE_WS_PASSWORD),
             "le mot de passe obs-websocket a fui dans {}",
+            entry.name()
+        );
+        assert!(
+            !text.contains(FAKE_DB_TOKEN),
+            "le token du fichier de plugin opaque a fui dans {}",
             entry.name()
         );
     }
