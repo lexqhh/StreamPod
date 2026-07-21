@@ -137,6 +137,10 @@ fn backup_puis_restore_round_trip() {
     assert_eq!(summary.profiles, 1);
     assert_eq!(summary.plugins, 1, "seul le plugin tiers doit être inclus");
     assert_eq!(summary.assets, 1);
+    assert!(
+        !backup_file.with_extension("obsbackup.tmp").exists(),
+        "le fichier temporaire doit avoir été basculé vers la destination finale"
+    );
 
     // --- Inspection de l'archive : aucun secret, exclusions respectées ---
     let mut zip = zip::ZipArchive::new(fs::File::open(&backup_file).unwrap()).unwrap();
@@ -415,6 +419,67 @@ fn diagnostic_remappage_en_lecture_seule() {
         "dossier temporaire créé : {reste:?}"
     );
     assert!(!root.join("OBS-Backup-Assets").exists());
+}
+
+#[test]
+fn backup_refuse_destination_dans_le_dossier_de_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+
+    let asset = root.join("assets-src").join("overlay.png");
+    fs::create_dir_all(asset.parent().unwrap()).unwrap();
+    fs::write(&asset, b"FAUX-PNG").unwrap();
+    let config_src = root.join("obs-studio");
+    build_fake_config(&config_src, &asset);
+
+    // Sinon l'archive serait ramassée par le parcours du dossier de config
+    // et se lirait elle-même pendant qu'elle grossit (disque saturé).
+    for destination in [
+        config_src.join("piege.obsbackup"),
+        config_src.join("basic").join("piege.obsbackup"),
+    ] {
+        let err = backup::create(&config_src, None, None, &destination, |_| {})
+            .expect_err("une destination dans le dossier de config doit être refusée");
+        assert!(err.contains("dossier de configuration"), "{err}");
+        assert!(!destination.exists(), "aucun fichier ne doit être créé");
+    }
+
+    // Une destination ailleurs reste acceptée.
+    backup::create(&config_src, None, None, &root.join("ok.obsbackup"), |_| {}).unwrap();
+}
+
+#[test]
+fn backup_echoue_sans_laisser_de_fichier_incomplet() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+
+    let asset = root.join("assets-src").join("overlay.png");
+    fs::create_dir_all(asset.parent().unwrap()).unwrap();
+    fs::write(&asset, b"FAUX-PNG").unwrap();
+    let config_src = root.join("obs-studio");
+    build_fake_config(&config_src, &asset);
+    // Un service.json corrompu fait échouer la sauvegarde en cours de route.
+    fs::write(
+        config_src
+            .join("basic")
+            .join("profiles")
+            .join("Principal")
+            .join("service.json"),
+        "PAS-DU-JSON",
+    )
+    .unwrap();
+
+    let destination = root.join("echec.obsbackup");
+    backup::create(&config_src, None, None, &destination, |_| {})
+        .expect_err("un service.json corrompu doit faire échouer la sauvegarde");
+    assert!(
+        !destination.exists(),
+        "aucune archive incomplète ne doit rester à la destination"
+    );
+    assert!(
+        !destination.with_extension("obsbackup.tmp").exists(),
+        "le fichier temporaire doit être nettoyé après un échec"
+    );
 }
 
 /// Liste les noms de tous les fichiers et dossiers sous `root`.

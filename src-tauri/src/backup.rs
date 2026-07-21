@@ -297,6 +297,37 @@ fn zip_file_from_disk(
     Ok(())
 }
 
+/// Le dossier de destination de l'archive est-il le dossier de config OBS
+/// ou l'un de ses sous-dossiers ?
+fn destination_dans_config(config_dir: &Path, output_path: &Path) -> bool {
+    let parent = match output_path.parent() {
+        Some(p) if !p.as_os_str().is_empty() => p,
+        _ => Path::new("."),
+    };
+    // Si le dossier de destination n'existe pas encore, File::create échouera
+    // de toute façon avec un message clair : pas de refus ici.
+    let (Ok(config), Ok(parent)) = (config_dir.canonicalize(), parent.canonicalize()) else {
+        return false;
+    };
+    let config = scenes::normalize_path(&config.to_string_lossy());
+    let parent = scenes::normalize_path(&parent.to_string_lossy());
+    parent == config || parent.starts_with(&format!("{config}/"))
+}
+
+/// Supprime le fichier temporaire si la sauvegarde échoue avant la bascule.
+struct NettoyageTmp<'a> {
+    path: &'a Path,
+    actif: bool,
+}
+
+impl Drop for NettoyageTmp<'_> {
+    fn drop(&mut self) {
+        if self.actif {
+            let _ = std::fs::remove_file(self.path);
+        }
+    }
+}
+
 /// Crée le fichier .obsbackup.
 pub fn create(
     config_dir: &Path,
@@ -346,8 +377,26 @@ pub fn create(
         .collect();
 
     // 3. Création de l'archive.
-    let file = File::create(output_path)
-        .map_err(|e| err(&format!("Création de {}", output_path.display()), e))?;
+    // Refus d'une destination à l'intérieur du dossier de config : l'archive
+    // serait ramassée par le parcours ci-dessous et zip_file_from_disk la
+    // lirait pendant qu'elle grossit — chaque lecture provoque une écriture
+    // plus loin dans le même fichier, le EOF n'arrive jamais et le disque
+    // se remplit. L'exclusion des .bak ne couvre pas ce cas.
+    if destination_dans_config(config_dir, output_path) {
+        return Err(
+            "La sauvegarde ne peut pas être enregistrée dans le dossier de configuration OBS. Choisissez un autre emplacement.".to_string(),
+        );
+    }
+    // Écriture dans un fichier temporaire puis bascule : la destination ne
+    // contient jamais d'archive incomplète, même en cas d'échec en cours
+    // de route.
+    let tmp_path = output_path.with_extension("obsbackup.tmp");
+    let file = File::create(&tmp_path)
+        .map_err(|e| err(&format!("Création de {}", tmp_path.display()), e))?;
+    let mut nettoyage = NettoyageTmp {
+        path: &tmp_path,
+        actif: true,
+    };
     let mut zip = ZipWriter::new(file);
     let deflate = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
     // Les médias sont déjà compressés : on les stocke tels quels (rapide),
@@ -528,6 +577,9 @@ pub fn create(
     zip.write_all(serde_json::to_string_pretty(&manifest).unwrap().as_bytes())
         .map_err(|e| err("Écriture de l'archive", e))?;
     zip.finish().map_err(|e| err("Finalisation de l'archive", e))?;
+    std::fs::rename(&tmp_path, output_path)
+        .map_err(|e| err(&format!("Mise en place de {}", output_path.display()), e))?;
+    nettoyage.actif = false;
 
     let file_size = output_path.metadata().map(|m| m.len()).unwrap_or(0);
     Ok(BackupSummary {
