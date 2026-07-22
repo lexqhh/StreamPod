@@ -241,7 +241,7 @@ const STEP_LABELS: Record<string, string> = {
   swap: "Mise en place",
 };
 
-listen<Progress>("owbs://progress", (event) => {
+listen<Progress>("streampod://progress", (event) => {
   const p = event.payload;
   const percent = p.total > 0 ? Math.min(100, (p.current / p.total) * 100) : 0;
   $("progress-bar").style.width = `${percent}%`;

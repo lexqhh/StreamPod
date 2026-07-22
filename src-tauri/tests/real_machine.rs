@@ -4,9 +4,9 @@
 //! - Sauvegarde la vraie configuration OBS vers un fichier temporaire.
 //! - Vérifie qu'aucune clé de stream réelle ni cookie n'y figure.
 //! - Restaure vers des dossiers temporaires (la vraie config n'est jamais
-//!   modifiée grâce aux variables OWBS_*).
+//!   modifiée grâce aux variables STREAMPOD_*).
 
-use owbs_lib::{backup, obs, restore};
+use streampod_lib::{backup, obs, restore};
 use std::io::Read;
 
 #[test]
@@ -81,13 +81,13 @@ fn sauvegarde_reelle_puis_restauration_en_bac_a_sable() {
 
     // Restauration en bac à sable.
     let sandbox = tmp.path().join("machine2");
-    std::env::set_var("OWBS_CONFIG_DIR", sandbox.join("obs-studio"));
-    std::env::set_var("OWBS_ASSETS_DIR", sandbox.join("assets"));
+    std::env::set_var("STREAMPOD_CONFIG_DIR", sandbox.join("obs-studio"));
+    std::env::set_var("STREAMPOD_ASSETS_DIR", sandbox.join("assets"));
     let fake_install = sandbox.join("obs-install");
     std::fs::create_dir_all(fake_install.join("obs-plugins").join("64bit")).unwrap();
-    std::env::set_var("OWBS_INSTALL_DIR", &fake_install);
+    std::env::set_var("STREAMPOD_INSTALL_DIR", &fake_install);
     if let Some(v) = &version {
-        std::env::set_var("OWBS_OBS_VERSION", v);
+        std::env::set_var("STREAMPOD_OBS_VERSION", v);
     }
 
     let result = restore::restore(&backup_file, &[], |_| {}, || false).unwrap();
@@ -106,7 +106,7 @@ fn sauvegarde_reelle_puis_restauration_en_bac_a_sable() {
 #[test]
 #[ignore]
 fn inventaire_reel_des_peripheriques() {
-    use owbs_lib::devices::{self, Famille};
+    use streampod_lib::devices::{self, Famille};
 
     let inventaire = devices::inventaire_reel().unwrap();
     let entrees = inventaire.iter().filter(|p| p.famille == Famille::EntreeAudio).count();

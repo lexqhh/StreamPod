@@ -1,8 +1,8 @@
 //! Test adversarial : une archive .obsbackup piégée (zip slip) doit être
 //! refusée en bloc, sans écrire le moindre fichier hors du bac à sable.
 
-use owbs_lib::backup::{AssetEntry, Manifest, PluginInfo, FORMAT_VERSION};
-use owbs_lib::restore;
+use streampod_lib::backup::{AssetEntry, Manifest, PluginInfo, FORMAT_VERSION};
+use streampod_lib::restore;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -44,7 +44,7 @@ fn restauration_refusee(backup: &Path) {
     );
 }
 
-// Un seul test séquentiel : les variables d'environnement OWBS_* sont
+// Un seul test séquentiel : les variables d'environnement STREAMPOD_* sont
 // globales au processus, des scénarios en parallèle se marcheraient dessus.
 #[test]
 fn archive_piegee_refusee_sans_ecriture_hors_bac_a_sable() {
@@ -57,10 +57,10 @@ fn archive_piegee_refusee_sans_ecriture_hors_bac_a_sable() {
     let sentinelle = "[General]\nSentinelle=oui\n";
     fs::write(config_dst.join("global.ini"), sentinelle).unwrap();
     let assets_dst = root.join("OBS-Backup-Assets");
-    std::env::set_var("OWBS_CONFIG_DIR", &config_dst);
-    std::env::set_var("OWBS_ASSETS_DIR", &assets_dst);
-    std::env::set_var("OWBS_INSTALL_DIR", root.join("obs-install"));
-    std::env::set_var("OWBS_OBS_VERSION", "31.0.2");
+    std::env::set_var("STREAMPOD_CONFIG_DIR", &config_dst);
+    std::env::set_var("STREAMPOD_ASSETS_DIR", &assets_dst);
+    std::env::set_var("STREAMPOD_INSTALL_DIR", root.join("obs-install"));
+    std::env::set_var("STREAMPOD_OBS_VERSION", "31.0.2");
 
     // Cibles sentinelles DANS le tempdir (jamais un vrai chemin système) :
     // si la faille réapparaît, l'écriture atterrit ici, hors des dossiers

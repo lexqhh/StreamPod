@@ -3,11 +3,11 @@
 //! temporaire avant la bascule.
 //!
 //! Fichier d'intégration séparé exprès : les variables d'environnement
-//! OWBS_* sont globales au processus, et ce binaire tourne dans son propre
+//! STREAMPOD_* sont globales au processus, et ce binaire tourne dans son propre
 //! processus — aucune interférence avec e2e.rs ou zip_slip.rs.
 
-use owbs_lib::devices::{Famille, Peripherique};
-use owbs_lib::{backup, remap, restore};
+use streampod_lib::devices::{Famille, Peripherique};
+use streampod_lib::{backup, remap, restore};
 use std::fs;
 use std::path::Path;
 
@@ -65,7 +65,7 @@ fn build_fake_config(root: &Path) {
 }
 
 /// Inventaire du PC cible : un remplaçant par famille, aucun des anciens
-/// identifiants. Écrit dans un fichier pour OWBS_DEVICES_JSON — la
+/// identifiants. Écrit dans un fichier pour STREAMPOD_DEVICES_JSON — la
 /// configuration et les périphériques réels ne sont jamais consultés.
 fn inventaire_cible() -> Vec<Peripherique> {
     vec![
@@ -104,11 +104,11 @@ fn remappage_de_bout_en_bout() {
     let config_dst = sandbox.join("obs-studio");
     let devices_json = root.join("devices.json");
     fs::write(&devices_json, serde_json::to_string(&inventaire_cible()).unwrap()).unwrap();
-    std::env::set_var("OWBS_CONFIG_DIR", &config_dst);
-    std::env::set_var("OWBS_ASSETS_DIR", sandbox.join("OBS-Backup-Assets"));
-    std::env::set_var("OWBS_INSTALL_DIR", sandbox.join("obs-install"));
-    std::env::set_var("OWBS_OBS_VERSION", "32.0.0");
-    std::env::set_var("OWBS_DEVICES_JSON", &devices_json);
+    std::env::set_var("STREAMPOD_CONFIG_DIR", &config_dst);
+    std::env::set_var("STREAMPOD_ASSETS_DIR", sandbox.join("OBS-Backup-Assets"));
+    std::env::set_var("STREAMPOD_INSTALL_DIR", sandbox.join("obs-install"));
+    std::env::set_var("STREAMPOD_OBS_VERSION", "32.0.0");
+    std::env::set_var("STREAMPOD_DEVICES_JSON", &devices_json);
 
     // --- Phase d'aperçu : diagnostic en lecture seule ---
     let rapport = remap::analyser(&backup_file, inventaire_cible()).unwrap();

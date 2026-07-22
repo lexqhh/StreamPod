@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "OwBS",
+  "productName": "StreamPod",
   "version": "0.1.0",
-  "identifier": "com.owbs.app",
+  "identifier": "com.streampod.app",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
@@ -13,7 +13,7 @@
     "withGlobalTauri": false,
     "windows": [
       {
-        "title": "OwBS — Sauvegarde OBS",
+        "title": "StreamPod — Sauvegarde OBS",
         "width": 960,
         "height": 680,
         "minWidth": 760,
@@ -32,7 +32,7 @@
       {
         "ext": ["obsbackup"],
         "name": "Sauvegarde OBS",
-        "description": "Sauvegarde OBS créée avec OwBS",
+        "description": "Sauvegarde OBS créée avec StreamPod",
         "role": "Editor"
       }
     ],

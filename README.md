@@ -1,12 +1,12 @@
 <div align="center">
 
-<img src="src-tauri/icons/icon.png" alt="Logo OwBS" width="128" height="128" />
+<img src="src-tauri/icons/icon.png" alt="Logo StreamPod" width="128" height="128" />
 
-# OwBS
+# StreamPod
 
 **Votre OBS complet, dans un seul fichier.**
 
-OwBS sauvegarde l'intégralité d'une installation OBS Studio dans un fichier
+StreamPod sauvegarde l'intégralité d'une installation OBS Studio dans un fichier
 `.obsbackup` unique, puis la restaure sur n'importe quel PC — sans jamais
 embarquer votre clé de stream.
 
@@ -14,7 +14,7 @@ embarquer votre clé de stream.
 
 ---
 
-Changer d'ordinateur, streamer en déplacement, réinstaller Windows : OwBS
+Changer d'ordinateur, streamer en déplacement, réinstaller Windows : StreamPod
 réunit vos **scènes, profils, paramètres, plugins et assets** dans une seule
 archive transportable sur clé USB, et remet tout en place de l'autre côté.
 Aucune connexion réseau, aucune télémétrie : **100 % local**.
@@ -41,7 +41,7 @@ Aucune connexion réseau, aucune télémétrie : **100 % local**.
   overlays sont déposés dans `Documents\OBS-Backup-Assets`, et les chemins sont
   réécrits dans les scènes pour pointer au bon endroit sur le nouveau PC.
 - **Remappage du matériel** — quand un micro, une webcam ou une sortie audio
-  n'existe pas sur la machine cible, OwBS propose des remplaçants classés par
+  n'existe pas sur la machine cible, StreamPod propose des remplaçants classés par
   pertinence. Vous confirmez chaque association ; rien n'est choisi à votre
   place.
 - **Secrets exclus par conception** — clé de stream, tokens OAuth et cookies de
@@ -89,15 +89,15 @@ avertissement.
 
 L'interface tient en deux boutons.
 
-**Sauvegarder** — OwBS détecte votre installation OBS, affiche un résumé de ce
+**Sauvegarder** — StreamPod détecte votre installation OBS, affiche un résumé de ce
 qui sera inclus (scènes, profils, plugins, taille des assets), puis vous
 demande où écrire le fichier `.obsbackup`.
 
 **Restaurer** — choisissez un `.obsbackup`, vérifiez le résumé, confirmez le
-remappage du matériel si nécessaire, et OwBS remet votre configuration en place.
+remappage du matériel si nécessaire, et StreamPod remet votre configuration en place.
 
 > [!IMPORTANT]
-> OBS doit être **fermé** pendant une sauvegarde ou une restauration. OwBS
+> OBS doit être **fermé** pendant une sauvegarde ou une restauration. StreamPod
 > refuse d'agir tant qu'`obs64.exe` est en cours d'exécution, pour éviter toute
 > corruption des fichiers en cours d'écriture par OBS.
 
@@ -109,22 +109,22 @@ jamais laisser OBS sans configuration.
 
 À propos des **plugins tiers** : la liste des plugins installés est enregistrée,
 mais leurs DLL ne sont **jamais** réinstallées depuis l'archive — une DLL issue
-d'un fichier est du code non vérifié. OwBS affiche simplement la liste des
+d'un fichier est du code non vérifié. StreamPod affiche simplement la liste des
 plugins à réinstaller manuellement depuis leurs sites officiels.
 
 ## Installation
 
-OwBS est une application **Windows** (10/11). OBS Studio doit avoir été lancé au
+StreamPod est une application **Windows** (10/11). OBS Studio doit avoir été lancé au
 moins une fois sur la machine pour que son dossier de configuration existe.
 
 Le plus simple est de récupérer l'exécutable portable produit par la
-compilation (voir [Développement](#développement)) : `OwBS.exe` se lance sans
+compilation (voir [Développement](#développement)) : `StreamPod.exe` se lance sans
 installation, y compris depuis une clé USB.
 
 > [!NOTE]
 > L'exécutable n'étant pas encore signé, Windows SmartScreen peut afficher un
 > avertissement au premier lancement. Choisissez **Informations complémentaires
-> → Exécuter quand même**. OwBS ne fait aucune requête réseau et ne se met pas à
+> → Exécuter quand même**. StreamPod ne fait aucune requête réseau et ne se met pas à
 > jour tout seul : revenez sur la page de téléchargement pour obtenir une
 > nouvelle version.
 
@@ -168,12 +168,12 @@ dans un bac à sable et **vérifie qu'aucun secret ne fuit** dans l'archive
 
 > [!WARNING]
 > Les tests ne touchent **jamais** votre vraie configuration OBS. Les variables
-> d'environnement `OWBS_CONFIG_DIR`, `OWBS_INSTALL_DIR`, `OWBS_ASSETS_DIR` et
-> `OWBS_OBS_VERSION` redirigent tous les chemins vers des dossiers temporaires.
+> d'environnement `STREAMPOD_CONFIG_DIR`, `STREAMPOD_INSTALL_DIR`, `STREAMPOD_ASSETS_DIR` et
+> `STREAMPOD_OBS_VERSION` redirigent tous les chemins vers des dossiers temporaires.
 
 ## Architecture
 
-OwBS est bâti sur **Tauri 2** (backend Rust) avec un frontend **Vite +
+StreamPod est bâti sur **Tauri 2** (backend Rust) avec un frontend **Vite +
 TypeScript** vanilla, en français.
 
 | Fichier | Rôle |

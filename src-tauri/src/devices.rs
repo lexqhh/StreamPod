@@ -51,11 +51,11 @@ pub fn nom_video(id: &str) -> Option<String> {
 
 /// Inventaire des périphériques actifs de ce PC.
 ///
-/// Surchargeable via la variable d'environnement OWBS_DEVICES_JSON (tests) :
+/// Surchargeable via la variable d'environnement STREAMPOD_DEVICES_JSON (tests) :
 /// chemin d'un fichier JSON `[{"famille": "...", "id": "...", "nom": "..."}]`.
 /// Les tests ne doivent jamais dépendre des périphériques réels.
 pub fn inventaire() -> Result<Vec<Peripherique>, String> {
-    if let Ok(path) = std::env::var("OWBS_DEVICES_JSON") {
+    if let Ok(path) = std::env::var("STREAMPOD_DEVICES_JSON") {
         return inventaire_depuis_fichier(&path);
     }
     inventaire_reel()

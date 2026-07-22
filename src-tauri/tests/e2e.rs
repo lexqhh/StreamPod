@@ -1,7 +1,7 @@
 //! Test end-to-end : backup → restore sur une fausse configuration OBS.
 //! Vérifie notamment qu'aucune clé de stream ne fuit dans l'archive.
 
-use owbs_lib::{backup, restore};
+use streampod_lib::{backup, restore};
 use std::fs;
 use std::io::Read;
 use std::path::Path;
@@ -266,10 +266,10 @@ fn backup_puis_restore_round_trip() {
     )
     .unwrap(); // ... ni son dossier data
 
-    std::env::set_var("OWBS_CONFIG_DIR", &config_dst);
-    std::env::set_var("OWBS_ASSETS_DIR", &assets_dst);
-    std::env::set_var("OWBS_INSTALL_DIR", &install_dst);
-    std::env::set_var("OWBS_OBS_VERSION", "31.1.0"); // même version majeure
+    std::env::set_var("STREAMPOD_CONFIG_DIR", &config_dst);
+    std::env::set_var("STREAMPOD_ASSETS_DIR", &assets_dst);
+    std::env::set_var("STREAMPOD_INSTALL_DIR", &install_dst);
+    std::env::set_var("STREAMPOD_OBS_VERSION", "31.1.0"); // même version majeure
 
     let result = restore::restore(&backup_file, &[], |_| {}, || false).unwrap();
     assert_eq!(result.scene_collections, 1);
@@ -348,8 +348,8 @@ fn backup_puis_restore_round_trip() {
 /// dossier temporaire, sans restaurer d'asset et sans modifier l'archive.
 #[test]
 fn diagnostic_remappage_en_lecture_seule() {
-    use owbs_lib::devices::{Famille, Peripherique};
-    use owbs_lib::remap;
+    use streampod_lib::devices::{Famille, Peripherique};
+    use streampod_lib::remap;
 
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
@@ -392,7 +392,7 @@ fn diagnostic_remappage_en_lecture_seule() {
     // --- Inventaire cible factice : le micro « valide » existe encore, la
     // webcam a un nouveau chemin matériel, et un remplaçant existe par
     // famille. La configuration réelle de la machine n'est jamais consultée
-    // (aucune variable OWBS_* n'est définie dans ce test). ---
+    // (aucune variable STREAMPOD_* n'est définie dans ce test). ---
     let inventaire = vec![
         Peripherique {
             famille: Famille::EntreeAudio,

@@ -2,7 +2,7 @@
 //! s'arrête proprement, nettoie ses fichiers temporaires et ne touche ni la
 //! configuration active ni le dossier d'assets définitif.
 
-use owbs_lib::{backup, restore};
+use streampod_lib::{backup, restore};
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -70,9 +70,9 @@ fn restore_annule_pendant_extraction_nettoie_et_preserve_le_disque() {
     // Machine cible : bac à sable redirigé, jamais la vraie config.
     let sandbox = root.join("machine-cible");
     let config_dst = sandbox.join("obs-studio");
-    std::env::set_var("OWBS_CONFIG_DIR", &config_dst);
-    std::env::set_var("OWBS_ASSETS_DIR", sandbox.join("OBS-Backup-Assets"));
-    std::env::set_var("OWBS_INSTALL_DIR", sandbox.join("obs-install"));
+    std::env::set_var("STREAMPOD_CONFIG_DIR", &config_dst);
+    std::env::set_var("STREAMPOD_ASSETS_DIR", sandbox.join("OBS-Backup-Assets"));
+    std::env::set_var("STREAMPOD_INSTALL_DIR", sandbox.join("obs-install"));
 
     let e = restore::restore(&backup_file, &[], |_| {}, annule_apres(2))
         .expect_err("la restauration annulée doit échouer");

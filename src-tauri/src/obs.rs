@@ -19,9 +19,9 @@ pub struct ObsInfo {
 }
 
 /// Dossier de configuration OBS. Surchargeable via la variable
-/// d'environnement OWBS_CONFIG_DIR (utilisée par les tests end-to-end).
+/// d'environnement STREAMPOD_CONFIG_DIR (utilisée par les tests end-to-end).
 pub fn config_dir() -> Option<PathBuf> {
-    if let Ok(dir) = std::env::var("OWBS_CONFIG_DIR") {
+    if let Ok(dir) = std::env::var("STREAMPOD_CONFIG_DIR") {
         let p = PathBuf::from(dir);
         return p.exists().then_some(p);
     }
@@ -33,24 +33,24 @@ pub fn config_dir() -> Option<PathBuf> {
 /// `config_dir()`, il est retourné même s'il n'existe pas encore (OBS
 /// fraîchement installé, jamais lancé).
 pub fn config_dir_target() -> Option<PathBuf> {
-    if let Ok(dir) = std::env::var("OWBS_CONFIG_DIR") {
+    if let Ok(dir) = std::env::var("STREAMPOD_CONFIG_DIR") {
         return Some(PathBuf::from(dir));
     }
     Some(dirs::config_dir()?.join("obs-studio"))
 }
 
 /// Dossier où sont déposés les assets restaurés. Surchargeable via
-/// OWBS_ASSETS_DIR (tests).
+/// STREAMPOD_ASSETS_DIR (tests).
 pub fn assets_target_dir() -> Option<PathBuf> {
-    if let Ok(dir) = std::env::var("OWBS_ASSETS_DIR") {
+    if let Ok(dir) = std::env::var("STREAMPOD_ASSETS_DIR") {
         return Some(PathBuf::from(dir));
     }
     Some(dirs::document_dir()?.join("OBS-Backup-Assets"))
 }
 
-/// Dossier d'installation OBS. Surchargeable via OWBS_INSTALL_DIR (tests).
+/// Dossier d'installation OBS. Surchargeable via STREAMPOD_INSTALL_DIR (tests).
 pub fn install_dir() -> Option<PathBuf> {
-    if let Ok(dir) = std::env::var("OWBS_INSTALL_DIR") {
+    if let Ok(dir) = std::env::var("STREAMPOD_INSTALL_DIR") {
         let p = PathBuf::from(dir);
         return p.exists().then_some(p);
     }
@@ -81,9 +81,9 @@ pub fn install_dir() -> Option<PathBuf> {
 }
 
 /// Version d'OBS installée, lue dans le registre Windows.
-/// Surchargeable via OWBS_OBS_VERSION (tests).
+/// Surchargeable via STREAMPOD_OBS_VERSION (tests).
 pub fn installed_version() -> Option<String> {
-    if let Ok(v) = std::env::var("OWBS_OBS_VERSION") {
+    if let Ok(v) = std::env::var("STREAMPOD_OBS_VERSION") {
         return Some(v);
     }
     #[cfg(windows)]

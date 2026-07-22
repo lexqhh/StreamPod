@@ -65,7 +65,7 @@ async fn backup_create(
             obs::installed_version(),
             Path::new(&output_path),
             |p| {
-                let _ = app.emit("owbs://progress", &p);
+                let _ = app.emit("streampod://progress", &p);
             },
             || ANNULATION_DEMANDEE.load(Ordering::Relaxed),
         )
@@ -108,7 +108,7 @@ async fn restore_run(
             Path::new(&backup_path),
             &choix,
             |p| {
-                let _ = app.emit("owbs://progress", &p);
+                let _ = app.emit("streampod://progress", &p);
             },
             || ANNULATION_DEMANDEE.load(Ordering::Relaxed),
         )
