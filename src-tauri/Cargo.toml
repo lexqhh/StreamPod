@@ -35,4 +35,3 @@ windows = { version = "0.62.2", features = ["Win32_Media_Audio", "Win32_Media_Di
 
 [dev-dependencies]
 tempfile = "3"
-

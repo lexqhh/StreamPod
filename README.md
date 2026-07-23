@@ -188,3 +188,11 @@ TypeScript** vanilla, en français.
 | `src-tauri/src/lib.rs` | Commandes exposées au frontend |
 | `src/main.ts` | Toute la logique de l'interface |
 
+## Droits d'auteur
+
+Copyright © 2026 MUDE. Tous droits réservés.
+
+Le code source est rendu public uniquement à des fins de consultation. Aucune
+licence open source n'est accordée. Toute réutilisation, modification,
+redistribution ou commercialisation du code nécessite l'autorisation écrite
+préalable de MUDE.
