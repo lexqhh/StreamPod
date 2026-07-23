@@ -1,14 +1,16 @@
 <div align="center">
 
-<img src="src-tauri/icons/icon.png" alt="Logo StreamPod" width="128" height="128" />
+<img src="src/assets/streampod-logo.png" alt="Logo StreamPod" width="108" />
 
 # StreamPod
 
 **Votre OBS complet, dans un seul fichier.**
 
 StreamPod sauvegarde l'intégralité d'une installation OBS Studio dans un fichier
-`.obsbackup` unique, puis la restaure sur n'importe quel PC — sans jamais
+`.obsbackup` unique, puis la restaure sur n'importe quel PC - sans jamais
 embarquer votre clé de stream.
+
+**[Site officiel : stream-pod.fr](https://stream-pod.fr/)**
 
 </div>
 
@@ -31,22 +33,22 @@ Aucune connexion réseau, aucune télémétrie : **100 % local**.
 
 ## Fonctionnalités
 
-- **Sauvegarde complète en un fichier** — collections de scènes, profils,
+- **Sauvegarde complète en un fichier** - collections de scènes, profils,
   paramètres globaux, configuration des plugins et tous les assets référencés,
   réunis dans une archive `.obsbackup` prête pour une clé USB.
-- **Restauration transactionnelle** — l'ancienne configuration est mise de côté
+- **Restauration transactionnelle** - l'ancienne configuration est mise de côté
   (`obs-studio.bak-<date>`) avant la bascule ; en cas d'échec, elle est remise
   en place automatiquement. Jamais d'OBS sans configuration.
-- **Assets embarqués et rechemins automatiques** — images, vidéos, sons et
+- **Assets embarqués et rechemins automatiques** - images, vidéos, sons et
   overlays sont déposés dans `Documents\OBS-Backup-Assets`, et les chemins sont
   réécrits dans les scènes pour pointer au bon endroit sur le nouveau PC.
-- **Remappage du matériel** — quand un micro, une webcam ou une sortie audio
+- **Remappage du matériel** - quand un micro, une webcam ou une sortie audio
   n'existe pas sur la machine cible, StreamPod propose des remplaçants classés par
   pertinence. Vous confirmez chaque association ; rien n'est choisi à votre
   place.
-- **Secrets exclus par conception** — clé de stream, tokens OAuth et cookies de
+- **Secrets exclus par conception** - clé de stream, tokens OAuth et cookies de
   session ne sont jamais écrits dans l'archive (voir [Confidentialité](#confidentialité)).
-- **Léger et portable** — application Tauri d'environ 10 Mo, sans runtime lourd
+- **Léger et portable** - application Tauri d'environ 10 Mo, sans runtime lourd
   à installer.
 
 ## Confidentialité
@@ -57,10 +59,10 @@ vos secrets.**
 Ne sont **jamais** enregistrés dans l'archive :
 
 - la **clé de stream** (Twitch, Kick, YouTube…) et les champs de comptes
-  connectés de `service.json` — y compris ses copies `.bak` ;
+  connectés de `service.json` - y compris ses copies `.bak` ;
 - les **tokens OAuth** et les lignes sensibles des fichiers `.ini` ;
 - les **cookies des docks navigateur** (`plugin_config\obs-browser`), qui
-  contiennent vos sessions Twitch/YouTube — c'est aussi ~700 Mo de cache évités ;
+  contiennent vos sessions Twitch/YouTube - c'est aussi ~700 Mo de cache évités ;
 - les logs, rapports de crash et données de profilage.
 
 Les fichiers de configuration des plugins sont assainis par liste blanche : seuls
@@ -83,17 +85,17 @@ avertissement.
 > Le manifeste et les scènes conservent les **chemins d'origine** de vos assets
 > (par exemple `C:\Users\<votre nom>\…`) : ils sont nécessaires pour réécrire
 > les scènes à la restauration. Un `.obsbackup` révèle donc le nom de votre
-> session Windows — à garder en tête si vous partagez le fichier.
+> session Windows - à garder en tête si vous partagez le fichier.
 
 ## Utilisation
 
 L'interface tient en deux boutons.
 
-**Sauvegarder** — StreamPod détecte votre installation OBS, affiche un résumé de ce
+**Sauvegarder** - StreamPod détecte votre installation OBS, affiche un résumé de ce
 qui sera inclus (scènes, profils, plugins, taille des assets), puis vous
 demande où écrire le fichier `.obsbackup`.
 
-**Restaurer** — choisissez un `.obsbackup`, vérifiez le résumé, confirmez le
+**Restaurer** - choisissez un `.obsbackup`, vérifiez le résumé, confirmez le
 remappage du matériel si nécessaire, et StreamPod remet votre configuration en place.
 
 > [!IMPORTANT]
@@ -104,11 +106,11 @@ remappage du matériel si nécessaire, et StreamPod remet votre configuration en
 Une opération longue (grosses collections d'assets) peut être **annulée** en
 cours de route : les fichiers temporaires sont nettoyés et rien n'est modifié.
 Pendant une restauration, l'annulation n'est plus possible une fois la mise en
-place de la configuration engagée — l'opération va alors jusqu'au bout pour ne
+place de la configuration engagée - l'opération va alors jusqu'au bout pour ne
 jamais laisser OBS sans configuration.
 
 À propos des **plugins tiers** : la liste des plugins installés est enregistrée,
-mais leurs DLL ne sont **jamais** réinstallées depuis l'archive — une DLL issue
+mais leurs DLL ne sont **jamais** réinstallées depuis l'archive - une DLL issue
 d'un fichier est du code non vérifié. StreamPod affiche simplement la liste des
 plugins à réinstaller manuellement depuis leurs sites officiels.
 
