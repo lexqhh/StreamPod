@@ -102,7 +102,7 @@ fn sauvegarde_reelle_puis_restauration_en_bac_a_sable() {
 
 /// Énumération réelle des périphériques (lecture seule, aucune écriture).
 /// Vérifie que les identifiants produits ont exactement le format qu'OBS
-/// écrit dans ses JSON (voir docs/FORMATS-OBS.md).
+/// écrit dans ses JSON.
 #[test]
 #[ignore]
 fn inventaire_reel_des_peripheriques() {

@@ -188,6 +188,3 @@ TypeScript** vanilla, en français.
 | `src-tauri/src/lib.rs` | Commandes exposées au frontend |
 | `src/main.ts` | Toute la logique de l'interface |
 
-Le format des identifiants matériels d'OBS (audio WASAPI, vidéo DirectShow) est
-documenté dans [`docs/FORMATS-OBS.md`](docs/FORMATS-OBS.md).
-

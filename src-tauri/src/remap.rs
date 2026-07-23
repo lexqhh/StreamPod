@@ -372,8 +372,8 @@ fn remapper_source(
     let remplacant = nouveaux.get(&cle)?.clone();
     let settings = source.get_mut("settings")?.as_object_mut()?;
     settings.insert(champ.to_string(), Value::String(remplacant.clone()));
-    // OBS maintient `last_video_device_id` en miroir de `video_device_id`
-    // (docs/FORMATS-OBS.md) : les deux champs sont réécrits à l'identique.
+    // OBS maintient `last_video_device_id` en miroir de `video_device_id` :
+    // les deux champs sont réécrits à l'identique.
     if famille == Famille::Video && settings.contains_key("last_video_device_id") {
         settings.insert("last_video_device_id".to_string(), Value::String(remplacant));
     }

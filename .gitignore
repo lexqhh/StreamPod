@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Documentation et instructions de travail privées
+AGENTS.md
+CLAUDE.md
+docs/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

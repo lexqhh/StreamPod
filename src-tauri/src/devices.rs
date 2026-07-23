@@ -1,6 +1,5 @@
 //! Inventaire des périphériques audio et vidéo actifs de ce PC, au format
-//! exact des identifiants qu'OBS écrit dans ses collections de scènes
-//! (voir docs/FORMATS-OBS.md) :
+//! exact des identifiants qu'OBS écrit dans ses collections de scènes :
 //! - audio : identifiant d'endpoint MMDevice `{0.0.X.00000000}.{guid}` ;
 //! - vidéo : `NomConvivial:CheminInterface` encodés façon win-dshow
 //!   (`#` → `#22`, `:` → `#3A`).
