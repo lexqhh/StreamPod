@@ -236,7 +236,7 @@ fn basculer_config_avec(
 
 /// Destination d'un asset : extrait d'abord dans un dossier de transit propre
 /// à cette restauration, puis déplacé vers son emplacement définitif une fois
-/// toute la préparation réussie — le dossier d'assets définitif n'est jamais
+/// toute la préparation réussie - le dossier d'assets définitif n'est jamais
 /// touché par une restauration qui échoue en cours de route.
 struct DestinationAsset {
     transit: PathBuf,
@@ -248,8 +248,8 @@ struct DestinationAsset {
 /// de l'eau, pour pouvoir les retirer si la suite de la restauration échoue.
 ///
 /// En cas de collision (un asset du même nom au même index existe déjà, par
-/// exemple laissé par une restauration précédente), le fichier est écrasé —
-/// même comportement qu'avant — et n'est pas retiré en cas de rollback.
+/// exemple laissé par une restauration précédente), le fichier est écrasé -
+/// même comportement qu'avant - et n'est pas retiré en cas de rollback.
 fn installer_assets(
     destinations: &BTreeMap<String, DestinationAsset>,
     installes: &mut Vec<PathBuf>,
@@ -382,7 +382,7 @@ pub fn restore(
 
     // Toute erreur entre l'extraction et la bascule supprime les deux
     // dossiers temporaires : ni configuration partielle, ni assets de
-    // transit orphelins — la configuration active et le dossier d'assets
+    // transit orphelins - la configuration active et le dossier d'assets
     // définitif n'ont pas bougé.
     let nettoyer_temporaires = || {
         let _ = std::fs::remove_dir_all(&tmp_config);
@@ -394,7 +394,7 @@ pub fn restore(
     let total_entries = archive.len() as u64;
 
     // Politique d'extraction : une entrée hors des préfixes connus (config/,
-    // assets/ du manifest) est ignorée sans erreur — compatibilité
+    // assets/ du manifest) est ignorée sans erreur - compatibilité
     // ascendante avec de futurs formats, rien n'est écrit. En revanche, un
     // chemin suspect SOUS un préfixe connu fait échouer toute la
     // restauration (zip slip).
@@ -486,7 +486,7 @@ pub fn restore(
     };
 
     // Dernier point d'annulation : au-delà, la restauration modifie le dossier
-    // d'assets définitif puis bascule la configuration — on va jusqu'au bout
+    // d'assets définitif puis bascule la configuration - on va jusqu'au bout
     // (garantie « jamais d'état sans config »), l'annulation est ignorée.
     if est_annule() {
         nettoyer_temporaires();
@@ -673,7 +673,7 @@ mod tests {
         std::fs::write(transit.join("0").join("overlay.png"), "nouveau 0").unwrap();
         std::fs::write(transit.join("1").join("alerte.mp3"), "nouveau 1").unwrap();
         // Collision : un asset au même index/nom existe déjà (restauration
-        // précédente) — il est écrasé et ne compte pas comme « nouveau ».
+        // précédente) - il est écrasé et ne compte pas comme « nouveau ».
         std::fs::create_dir_all(finale.join("0")).unwrap();
         std::fs::write(finale.join("0").join("overlay.png"), "ancien").unwrap();
 

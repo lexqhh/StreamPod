@@ -4,7 +4,7 @@
 //!
 //! Fichier d'intégration séparé exprès : les variables d'environnement
 //! STREAMPOD_* sont globales au processus, et ce binaire tourne dans son propre
-//! processus — aucune interférence avec e2e.rs ou zip_slip.rs.
+//! processus - aucune interférence avec e2e.rs ou zip_slip.rs.
 
 use streampod_lib::devices::{Famille, Peripherique};
 use streampod_lib::{backup, remap, restore};
@@ -65,7 +65,7 @@ fn build_fake_config(root: &Path) {
 }
 
 /// Inventaire du PC cible : un remplaçant par famille, aucun des anciens
-/// identifiants. Écrit dans un fichier pour STREAMPOD_DEVICES_JSON — la
+/// identifiants. Écrit dans un fichier pour STREAMPOD_DEVICES_JSON - la
 /// configuration et les périphériques réels ne sont jamais consultés.
 fn inventaire_cible() -> Vec<Peripherique> {
     vec![

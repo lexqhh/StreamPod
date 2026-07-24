@@ -1,7 +1,7 @@
 //! Diagnostic en lecture seule du remappage matériel (étape 2 du plan).
 //!
 //! Lit les collections de scènes directement dans l'archive `.obsbackup`
-//! — sans extraction, sans dossier temporaire, sans copie d'asset — puis
+//! - sans extraction, sans dossier temporaire, sans copie d'asset - puis
 //! compare les périphériques référencés avec l'inventaire de ce PC pour
 //! distinguer les références encore valides des associations à confirmer.
 //!
@@ -99,7 +99,7 @@ fn normaliser_id(id: &str) -> String {
 /// Normalise un nom de périphérique pour la comparaison : minuscules
 /// Unicode, translittération légère des caractères de marque courants,
 /// ponctuation et espaces réduits. Les noms affichés ou écrits ne sont
-/// jamais modifiés — cette forme ne sert qu'au tri des candidats.
+/// jamais modifiés - cette forme ne sert qu'au tri des candidats.
 fn normaliser_nom(nom: &str) -> String {
     let mut s = String::new();
     for c in nom.to_lowercase().chars() {
@@ -212,7 +212,7 @@ fn analyser_collection(
     }
 }
 
-/// Une référence est valide si le périphérique existe encore sur ce PC —
+/// Une référence est valide si le périphérique existe encore sur ce PC -
 /// ou s'il s'agit de la valeur audio spéciale `default` (« périphérique par
 /// défaut du système »), qui ne correspond à aucun matériel précis.
 fn est_valide(famille: Famille, id_normalise: &str, inventaire: &[Peripherique]) -> bool {
@@ -824,7 +824,7 @@ mod tests {
             .map(|p| p.nom.as_str())
             .collect();
         // Même nom, chemin matériel changé : en premier. Puis la webcam de
-        // nom proche (mot commun), puis le reste — jamais exclu, seulement
+        // nom proche (mot commun), puis le reste - jamais exclu, seulement
         // ordonné.
         assert_eq!(noms, vec!["Webcam C900", "Webcam C920", "Carte de capture"]);
     }

@@ -69,7 +69,7 @@ fn archive_piegee_refusee_sans_ecriture_hors_bac_a_sable() {
     let evil2 = root.join("evil2.txt");
     let evil3 = root.join("evil3.txt");
 
-    // Scénario 1 (PoC) : entrée config/ avec chemin absolu Windows —
+    // Scénario 1 (PoC) : entrée config/ avec chemin absolu Windows -
     // PathBuf::join abandonnerait la base.
     let piege1 = root.join("piege1.obsbackup");
     write_archive(
@@ -120,8 +120,8 @@ fn archive_piegee_refusee_sans_ecriture_hors_bac_a_sable() {
     assert!(!bak_cree, "aucune copie de sécurité ne doit être créée sur refus");
 
     // Scénario 4 : DLL arbitraire. L'archive embarque une DLL sous
-    // plugins/64bit/ visant à écraser un plugin officiel, et son manifest —
-    // écrit par l'auteur de l'archive — revendique la même version majeure
+    // plugins/64bit/ visant à écraser un plugin officiel, et son manifest -
+    // écrit par l'auteur de l'archive - revendique la même version majeure
     // d'OBS que la machine. La restauration réussit, mais aucune DLL ne doit
     // être écrite : les plugins sont seulement listés (statut "manual").
     let install_dir = root.join("obs-install");

@@ -62,7 +62,7 @@ interface RestoreSummary {
   profiles: number;
   assets_restored: number;
   assets_dir: string | null;
-  /** "manual" | "none" — les plugins ne sont jamais installés automatiquement. */
+  /** "manual" | "none" - les plugins ne sont jamais installés automatiquement. */
   plugins_status: string;
   plugins: string[];
   previous_config_backup: string | null;
@@ -182,7 +182,7 @@ function noteItem(text: string, kind: "warning" | "note"): HTMLElement {
 }
 
 function listOrDash(items: string[], max = 4): string {
-  if (items.length === 0) return "—";
+  if (items.length === 0) return "-";
   const shown = items.slice(0, max).join(", ");
   return items.length > max ? `${shown}… (+${items.length - max})` : shown;
 }
@@ -194,7 +194,7 @@ async function refreshObsStatus(): Promise<ObsInfo | null> {
   try {
     const info = await invoke<ObsInfo>("detect_obs");
     if (info.running) {
-      status.textContent = "⚠ OBS est ouvert — fermez-le avant toute opération";
+      status.textContent = "⚠ OBS est ouvert - fermez-le avant toute opération";
       status.className = "obs-status warn";
     } else if (info.config_dir) {
       status.textContent = `✔ OBS ${info.version ?? ""} détecté`.trim();
@@ -254,7 +254,7 @@ listen<Progress>("streampod://progress", (event) => {
     return; // Ne pas écraser « Annulation en cours… ».
   }
   const label = STEP_LABELS[p.step] ?? p.step;
-  $("progress-message").textContent = `${label} — ${p.message}`;
+  $("progress-message").textContent = `${label} - ${p.message}`;
 });
 
 function demanderAnnulation() {
@@ -286,7 +286,7 @@ async function startBackupFlow() {
       ),
       summaryRow(
         "Assets (images, vidéos, sons…)",
-        `${preview.asset_count} fichier(s) — ${formatBytes(preview.asset_total_size)}`,
+        `${preview.asset_count} fichier(s) - ${formatBytes(preview.asset_total_size)}`,
       ),
     );
     const warnings = $("backup-warnings");
@@ -494,7 +494,7 @@ function remapItem(assoc: Association, index: number): HTMLElement {
     select.append(opt);
   }
   if (assoc.candidats.length === 0) {
-    keep.textContent = "Aucun périphérique compatible détecté — laisser inchangé";
+    keep.textContent = "Aucun périphérique compatible détecté - laisser inchangé";
     select.disabled = true;
   }
   choice.append(label, select);

@@ -344,7 +344,7 @@ fn backup_puis_restore_round_trip() {
 }
 
 /// Étape 2 du remappage matériel : le diagnostic est strictement en lecture
-/// seule — il détecte les périphériques absents sans extraire, sans créer de
+/// seule - il détecte les périphériques absents sans extraire, sans créer de
 /// dossier temporaire, sans restaurer d'asset et sans modifier l'archive.
 #[test]
 fn diagnostic_remappage_en_lecture_seule() {

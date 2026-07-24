@@ -90,16 +90,11 @@ button:focus-visible {
   min-width: 0;
 }
 
-.brand-icon {
+.brand-logo {
   width: 52px;
   height: 52px;
-  display: grid;
-  place-items: center;
-  font-size: 1.7rem;
-  color: white;
-  background: linear-gradient(135deg, var(--accent), #4f3dd1);
-  border-radius: 14px;
-  box-shadow: 0 6px 22px rgba(124, 92, 255, 0.35);
+  flex-shrink: 0;
+  object-fit: contain;
 }
 
 .brand h1 {
@@ -488,10 +483,9 @@ button:focus-visible {
     margin-bottom: 1rem;
   }
 
-  .brand-icon {
+  .brand-logo {
     width: 44px;
     height: 44px;
-    border-radius: 12px;
   }
 
   .card {

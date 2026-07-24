@@ -423,7 +423,7 @@ pub fn create(
     // 3. Création de l'archive.
     // Refus d'une destination à l'intérieur du dossier de config : l'archive
     // serait ramassée par le parcours ci-dessous et zip_file_from_disk la
-    // lirait pendant qu'elle grossit — chaque lecture provoque une écriture
+    // lirait pendant qu'elle grossit - chaque lecture provoque une écriture
     // plus loin dans le même fichier, le EOF n'arrive jamais et le disque
     // se remplit. L'exclusion des .bak ne couvre pas ce cas.
     if destination_dans_config(config_dir, output_path) {
@@ -487,7 +487,7 @@ pub fn create(
         // contenir des secrets (mot de passe serveur…) et doivent être
         // nettoyés comme service.json. On exclut volontairement les scènes
         // (basic/scenes/**), qui contiennent des champs `key` légitimes
-        // (raccourcis clavier) — celles-ci ne passent jamais par ici car
+        // (raccourcis clavier) - celles-ci ne passent jamais par ici car
         // elles ne sont pas sous plugin_config/.
         let is_plugin_json = rel_lower.starts_with("plugin_config/") && rel_lower.ends_with(".json");
         if is_service_json {
@@ -583,7 +583,7 @@ pub fn create(
     }
 
     // 3c. Plugins tiers : jamais archivés. Les DLL ne sont de toute façon
-    // jamais restaurées (une archive est une donnée non fiable) — seule la
+    // jamais restaurées (une archive est une donnée non fiable) - seule la
     // liste du manifest sert, pour la réinstallation manuelle. Les archiver
     // n'apportait que du poids mort de binaires opaques.
 

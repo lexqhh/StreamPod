@@ -13,7 +13,7 @@
     "withGlobalTauri": false,
     "windows": [
       {
-        "title": "StreamPod — Sauvegarde OBS",
+        "title": "StreamPod - Sauvegarde OBS",
         "width": 960,
         "height": 680,
         "minWidth": 760,
