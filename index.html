@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>StreamPod - Sauvegarde OBS</title>
-    <link rel="icon" type="image/png" href="/src/assets/streampod-icon.png" />
+    <link rel="icon" type="image/png" href="/src/assets/streampod-logo.png" />
     <script type="module" src="/src/main.ts" defer></script>
     <link rel="stylesheet" href="/src/styles.css" />
   </head>
@@ -13,13 +13,10 @@
     <main class="app">
       <header class="app-header">
         <div class="brand">
-          <img
-            class="brand-logo"
-            src="/src/assets/streampod-logo.png"
-            alt="Logo StreamPod"
-          />
+          <!-- Le logo est décoratif : le nom est toujours présent en texte. -->
+          <img class="brand-logo" src="/src/assets/streampod-logo.png" alt="" />
           <div>
-            <h1>StreamPod</h1>
+            <h1>Stream<span class="brand-accent">Pod</span></h1>
             <p class="tagline">Votre OBS complet, dans un seul fichier.</p>
           </div>
         </div>
@@ -35,7 +32,22 @@
       <section id="screen-home" class="screen">
         <div class="cards">
           <button id="card-backup" class="card">
-            <div class="card-icon">⬇</div>
+            <svg
+              class="card-icon"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
             <h2>Sauvegarder mon OBS</h2>
             <p>
               Scènes, profils, paramètres, plugins et assets réunis dans un
@@ -43,7 +55,22 @@
             </p>
           </button>
           <button id="card-restore" class="card">
-            <div class="card-icon">⬆</div>
+            <svg
+              class="card-icon"
+              width="20"
+              height="20"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
             <h2>Restaurer une sauvegarde</h2>
             <p>
               Choisissez un fichier <code>.obsbackup</code> et retrouvez votre
@@ -52,8 +79,8 @@
           </button>
         </div>
         <p class="privacy-note">
-          🔒 100&nbsp;% local. Votre clé de stream et vos comptes connectés ne
-          sont jamais enregistrés dans la sauvegarde.
+          <span class="included">✓ 100&nbsp;% local · tout ce qu'il faut pour retrouver votre OBS</span>
+          <span class="excluded">✕ Jamais votre clé de stream ni vos mots de passe</span>
         </p>
       </section>
 
@@ -63,7 +90,7 @@
         <div id="backup-summary" class="summary"></div>
         <div id="backup-warnings" class="warnings"></div>
         <p class="privacy-note">
-          🔒 Votre clé de stream ne sera pas incluse dans le fichier.
+          <span class="excluded">✕ Jamais votre clé de stream ni vos mots de passe</span>
         </p>
         <div class="actions">
           <button class="btn secondary" data-goto="home">Annuler</button>
@@ -121,8 +148,8 @@
 
       <!-- Terminé -->
       <section id="screen-done" class="screen hidden">
-        <div class="done-icon">✔</div>
-        <h2 id="done-title">Terminé !</h2>
+        <div class="done-icon" aria-hidden="true">✓</div>
+        <h2 id="done-title">Terminé&nbsp;!</h2>
         <div id="done-details" class="summary"></div>
         <div id="done-notes" class="warnings"></div>
         <div class="actions">

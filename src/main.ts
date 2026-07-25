@@ -174,10 +174,18 @@ function summaryRow(label: string, value: string): HTMLElement {
   return row;
 }
 
+/** Panneau d'avertissement ou de note. La marque de préfixe est un élément
+ *  distinct : elle seule porte la couleur d'état (charte, § 11). */
 function noteItem(text: string, kind: "warning" | "note"): HTMLElement {
   const el = document.createElement("div");
   el.className = kind === "warning" ? "warning-item" : "note-item";
-  el.textContent = text;
+  const mark = document.createElement("span");
+  mark.className = "mark";
+  mark.setAttribute("aria-hidden", "true");
+  mark.textContent = kind === "warning" ? "!" : "✓";
+  const body = document.createElement("span");
+  body.textContent = text;
+  el.append(mark, body);
   return el;
 }
 
@@ -194,10 +202,10 @@ async function refreshObsStatus(): Promise<ObsInfo | null> {
   try {
     const info = await invoke<ObsInfo>("detect_obs");
     if (info.running) {
-      status.textContent = "⚠ OBS est ouvert - fermez-le avant toute opération";
+      status.textContent = "! OBS est ouvert - fermez-le avant toute opération";
       status.className = "obs-status warn";
     } else if (info.config_dir) {
-      status.textContent = `✔ OBS ${info.version ?? ""} détecté`.trim();
+      status.textContent = `✓ OBS ${info.version ?? ""} détecté`.trim();
       status.className = "obs-status ok";
     } else {
       status.textContent = "OBS non détecté sur cet ordinateur";
@@ -332,7 +340,7 @@ async function runBackup() {
 
   try {
     const result = await invoke<BackupSummary>("backup_create", { outputPath });
-    $("done-title").textContent = "Sauvegarde terminée !";
+    $("done-title").textContent = "Sauvegarde terminée !";
     $("done-details").replaceChildren(
       summaryRow("Fichier créé", result.output_path),
       summaryRow("Taille", formatBytes(result.file_size)),
@@ -341,7 +349,7 @@ async function runBackup() {
     );
     $("done-notes").replaceChildren(
       noteItem(
-        "🔒 Votre clé de stream et vos comptes connectés n'ont pas été inclus dans ce fichier.",
+        "Votre clé de stream et vos comptes connectés n'ont pas été inclus dans ce fichier.",
         "note",
       ),
       noteItem(
@@ -544,7 +552,7 @@ async function runRestore() {
       backupPath: selectedBackupPath,
       choix: remapChoices,
     });
-    $("done-title").textContent = "Restauration terminée !";
+    $("done-title").textContent = "Restauration terminée !";
     const details = $("done-details");
     details.replaceChildren(
       summaryRow(
@@ -578,8 +586,8 @@ async function runRestore() {
       notes.append(
         noteItem(
           result.sources_remappees === 1
-            ? "✔ 1 source utilise maintenant le périphérique choisi pour ce PC."
-            : `✔ ${result.sources_remappees} sources utilisent maintenant les périphériques choisis pour ce PC.`,
+            ? "1 source utilise maintenant le périphérique choisi pour ce PC."
+            : `${result.sources_remappees} sources utilisent maintenant les périphériques choisis pour ce PC.`,
           "note",
         ),
       );
