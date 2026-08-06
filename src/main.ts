@@ -650,6 +650,13 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   void refreshObsStatus();
-  // Le statut OBS (ouvert/fermé) se rafraîchit périodiquement.
-  setInterval(() => void refreshObsStatus(), 5000);
+  // Le statut OBS (ouvert/fermé) se rafraîchit périodiquement, sauf pendant une
+  // sauvegarde ou une restauration : le bandeau est alors masqué par l'écran de
+  // progression, et le backend a déjà vérifié qu'OBS était fermé au démarrage.
+  setInterval(() => {
+    if (!$("screen-progress").classList.contains("hidden")) {
+      return;
+    }
+    void refreshObsStatus();
+  }, 5000);
 });
