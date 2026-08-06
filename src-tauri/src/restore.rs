@@ -291,6 +291,10 @@ fn retirer_assets(installes: &[PathBuf]) {
 
 /// Restaure une sauvegarde .obsbackup en appliquant les choix de remappage
 /// matériel confirmés par l'utilisateur (`choix` peut être vide).
+///
+/// Le refus si OBS tourne est à la charge de l'appelant (commande `restore_run`
+/// dans lib.rs, comme `backup_create`) : la restauration elle-même reste ainsi
+/// testable sans dépendre des processus de la machine.
 pub fn restore(
     backup_path: &Path,
     choix: &[remap::Choix],
@@ -305,13 +309,6 @@ pub fn restore(
             total,
         });
     };
-
-    if obs::is_running() {
-        return Err(
-            "OBS est en cours d'exécution. Fermez OBS avant de restaurer la sauvegarde."
-                .to_string(),
-        );
-    }
 
     let mut archive = open_archive(backup_path)?;
     let manifest = read_manifest(&mut archive)?;

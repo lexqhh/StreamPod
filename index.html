@@ -20,7 +20,9 @@
             <p class="tagline">Votre OBS complet, dans un seul fichier.</p>
           </div>
         </div>
-        <div id="obs-status" class="obs-status">Recherche d'OBS…</div>
+        <!-- aria-live : le statut change tout seul au fil du sondage, et il
+             commande l'activation des boutons - il doit être annoncé. -->
+        <div id="obs-status" class="obs-status" aria-live="polite">Recherche d'OBS…</div>
       </header>
 
       <div id="error-banner" class="error-banner hidden" role="alert">
@@ -77,6 +79,16 @@
               configuration complète sur cet ordinateur.
             </p>
           </button>
+        </div>
+        <!-- Motif du verrouillage des deux cartes ; piloté par appliquerVerrouObs(). -->
+        <div id="home-obs-lock" class="warnings hidden">
+          <div class="warning-item">
+            <span class="mark" aria-hidden="true">!</span>
+            <span
+              >OBS est ouvert. Fermez OBS pour sauvegarder ou restaurer votre
+              configuration.</span
+            >
+          </div>
         </div>
         <p class="privacy-note">
           <span class="included">✓ 100&nbsp;% local · tout ce qu'il faut pour retrouver votre OBS</span>

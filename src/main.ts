@@ -197,6 +197,36 @@ function listOrDash(items: string[], max = 4): string {
 
 /* ---------- Statut OBS (en-tête) ---------- */
 
+const MSG_OBS_OUVERT =
+  "OBS est en cours d'exécution. Fermez OBS puis réessayez.";
+
+/** Dernier statut connu, rafraîchi toutes les 5 s : c'est lui qui commande
+ *  l'activation des commandes, pas seulement le texte d'en-tête. */
+let obsRunning = false;
+/** Mémorisé depuis l'aperçu de restauration, pour que le sondage puisse
+ *  recalculer l'état de « Restaurer maintenant » sans écraser cette règle. */
+let restoreObsInstalled = true;
+
+/** Verrouille tout ce qui mène à une écriture tant qu'OBS est ouvert : refuser
+ *  au dernier moment ferait perdre à l'utilisateur ses choix de remappage. */
+function appliquerVerrouObs() {
+  for (const id of ["card-backup", "card-restore"]) {
+    const carte = $<HTMLButtonElement>(id);
+    carte.disabled = obsRunning;
+    // La classe double l'attribut : sous Blink, basculer `disabled` en JS ne
+    // fait pas recalculer le style des descendants de la carte (voir le
+    // commentaire de .card.verrouillee dans styles.css).
+    carte.classList.toggle("verrouillee", obsRunning);
+  }
+  $<HTMLButtonElement>("btn-start-backup").disabled = obsRunning;
+  $<HTMLButtonElement>("btn-start-restore").disabled =
+    obsRunning || !restoreObsInstalled;
+  $<HTMLButtonElement>("btn-continue-restore").disabled = obsRunning;
+  // Le bouton Annuler de l'écran de progression n'est jamais verrouillé ici :
+  // il reste utilisable même si OBS est lancé pendant une opération.
+  $("home-obs-lock").classList.toggle("hidden", !obsRunning);
+}
+
 async function refreshObsStatus(): Promise<ObsInfo | null> {
   const status = $("obs-status");
   try {
@@ -211,12 +241,29 @@ async function refreshObsStatus(): Promise<ObsInfo | null> {
       status.textContent = "OBS non détecté sur cet ordinateur";
       status.className = "obs-status warn";
     }
+    obsRunning = info.running;
+    appliquerVerrouObs();
     return info;
   } catch {
     status.textContent = "Impossible de détecter OBS";
     status.className = "obs-status warn";
+    // Détection en échec : ne pas verrouiller l'app sur un doute, les gardes
+    // côté Rust restent le dernier rempart.
+    obsRunning = false;
+    appliquerVerrouObs();
     return null;
   }
+}
+
+/** Statut frais juste avant d'agir : le sondage laisse une fenêtre de 5 s
+ *  pendant laquelle OBS a pu être lancé. Affiche l'erreur le cas échéant. */
+async function obsBloqueLOperation(): Promise<boolean> {
+  const info = await refreshObsStatus();
+  if (info?.running) {
+    showError(MSG_OBS_OUVERT);
+    return true;
+  }
+  return false;
 }
 
 /* ---------- Progression ---------- */
@@ -277,6 +324,7 @@ function demanderAnnulation() {
 
 async function startBackupFlow() {
   hideError();
+  if (await obsBloqueLOperation()) return;
   try {
     const preview = await invoke<BackupPreview>("backup_preview");
     const summary = $("backup-summary");
@@ -327,6 +375,7 @@ async function startBackupFlow() {
 
 async function runBackup() {
   hideError();
+  if (await obsBloqueLOperation()) return;
   const date = new Date().toISOString().slice(0, 10);
   const outputPath = await save({
     title: "Enregistrer la sauvegarde OBS",
@@ -374,6 +423,7 @@ let selectedBackupPath: string | null = null;
 
 async function startRestoreFlow() {
   hideError();
+  if (await obsBloqueLOperation()) return;
   const path = await open({
     title: "Choisir une sauvegarde OBS",
     multiple: false,
@@ -407,7 +457,8 @@ async function startRestoreFlow() {
     );
     const warnings = $("restore-warnings");
     warnings.replaceChildren(...preview.warnings.map((w) => noteItem(w, "warning")));
-    $<HTMLButtonElement>("btn-start-restore").disabled = !preview.obs_installed;
+    restoreObsInstalled = preview.obs_installed;
+    appliquerVerrouObs();
     show("restore-preview");
   } catch (e) {
     showError(String(e));
@@ -430,6 +481,9 @@ let remapChoices: RemapChoice[] = [];
 async function prepareRestore() {
   if (!selectedBackupPath) return;
   hideError();
+  // Avant le diagnostic : inutile de faire confirmer des périphériques si la
+  // restauration sera refusée à l'arrivée.
+  if (await obsBloqueLOperation()) return;
   currentRemapReport = null;
   remapChoices = [];
 
@@ -543,6 +597,7 @@ function collectRemapChoices(): RemapChoice[] {
 
 async function runRestore() {
   if (!selectedBackupPath) return;
+  if (await obsBloqueLOperation()) return;
 
   resetProgress("Restauration en cours…");
   show("progress");

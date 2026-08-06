@@ -288,6 +288,30 @@ h2:focus-visible {
   border-radius: var(--radius-sm);
 }
 
+/* OBS ouvert : la carte est inerte. Même vocabulaire que .btn:disabled - texte
+   et bordure en muet, aucune récompense de survol. Le motif est donné juste en
+   dessous par #home-obs-lock. Placé après le style de base de la carte : c'est
+   un état, il doit pouvoir écraser chacune de ses règles.
+
+   La classe `verrouillee` double l'attribut `disabled` (posée avec lui par
+   appliquerVerrouObs) : basculer `disabled` en JS ne fait pas recalculer le
+   style des DESCENDANTS sous Blink/WebView2 - le paragraphe et l'icône
+   resteraient colorés. Un changement de classe, lui, les invalide. */
+.card.verrouillee,
+.card.verrouillee:hover {
+  border-color: var(--line);
+  cursor: default;
+}
+
+.card.verrouillee,
+.card.verrouillee h2,
+.card.verrouillee p,
+.card.verrouillee code,
+.card.verrouillee .card-icon,
+.card.verrouillee:hover .card-icon {
+  color: var(--muted-5);
+}
+
 /* Couple inclus / exclu : motif rhétorique de la marque, on montre toujours
    les deux (§ 8, § 12). */
 .privacy-note {

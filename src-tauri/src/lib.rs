@@ -104,6 +104,9 @@ async fn restore_run(
 ) -> Result<restore::RestoreSummary, String> {
     ANNULATION_DEMANDEE.store(false, Ordering::Relaxed);
     tauri::async_runtime::spawn_blocking(move || {
+        if obs::is_running() {
+            return Err(OBS_RUNNING_MSG.to_string());
+        }
         restore::restore(
             Path::new(&backup_path),
             &choix,
