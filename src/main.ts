@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 
 /* ---------- Types (miroir des structs Rust) ---------- */
 
@@ -437,6 +438,7 @@ async function runBackup() {
         "note",
       ),
     );
+    setRevealTarget({ path: result.output_path, kind: "file" });
     show("done");
   } catch (e) {
     show("home");
@@ -445,6 +447,20 @@ async function runBackup() {
       showError(String(e));
     }
   }
+}
+
+/* ---------- Écran « Terminé » : ouverture dans l'explorateur ---------- */
+
+// L'écran « Terminé » est partagé par les deux parcours et sa barre d'actions
+// n'est pas reconstruite : la cible doit être redéfinie à chaque passage, sinon
+// le fichier d'une sauvegarde resterait ouvrable après une restauration.
+type RevealTarget = { path: string; kind: "file" | "dir" } | null;
+
+let revealTarget: RevealTarget = null;
+
+function setRevealTarget(target: RevealTarget) {
+  revealTarget = target;
+  $("btn-reveal").classList.toggle("hidden", target === null);
 }
 
 /* ---------- Parcours : restauration ---------- */
@@ -702,6 +718,9 @@ async function runRestore() {
         "warning",
       ),
     );
+    setRevealTarget(
+      result.assets_dir ? { path: result.assets_dir, kind: "dir" } : null,
+    );
     show("done");
   } catch (e) {
     show("home");
@@ -725,6 +744,14 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   $("error-close").addEventListener("click", hideError);
   $("btn-cancel-operation").addEventListener("click", demanderAnnulation);
+  $("btn-reveal").addEventListener("click", () => {
+    if (!revealTarget) return;
+    const { path, kind } = revealTarget;
+    // Un dossier s'ouvre directement, un fichier est sélectionné dans son dossier.
+    const ouverture = kind === "dir" ? openPath(path) : revealItemInDir(path);
+    // Le chemin peut avoir disparu entre-temps : on prévient sans casser l'écran.
+    ouverture.catch((e) => showError(String(e)));
+  });
 
   document.querySelectorAll<HTMLElement>("[data-goto]").forEach((el) => {
     el.addEventListener("click", () => {
