@@ -134,6 +134,9 @@
           plus tard dans OBS. Rien n'est modifié sans votre confirmation.
         </p>
         <div id="remap-list" class="remap-list"></div>
+        <!-- Motif du verrou si OBS est lancé pendant la confirmation ; posé par
+             appliquerVerrouObs(), sinon « Continuer » reste grisé sans raison. -->
+        <div id="remap-warnings" class="warnings"></div>
         <div class="actions">
           <button class="btn secondary" data-goto="restore-preview">Retour</button>
           <button id="btn-continue-restore" class="btn primary">

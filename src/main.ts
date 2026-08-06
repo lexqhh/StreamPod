@@ -256,6 +256,9 @@ function appliquerVerrouObs() {
   $("home-obs-lock").classList.toggle("hidden", !obsRunning || ecranCourant !== "home");
   majMotifVerrou("backup-warnings", obsRunning && ecranCourant === "backup-preview");
   majMotifVerrou("restore-warnings", obsRunning && ecranCourant === "restore-preview");
+  // L'écran de remappage n'est atteignable qu'OBS fermé, mais OBS peut être
+  // lancé pendant que l'utilisateur y confirme ses périphériques.
+  majMotifVerrou("remap-warnings", obsRunning && ecranCourant === "remap");
 }
 
 async function refreshObsStatus(): Promise<ObsInfo | null> {
