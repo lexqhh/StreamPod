@@ -324,7 +324,9 @@ const STEP_LABELS: Record<string, string> = {
   finalize: "Finalisation",
   extract: "Extraction",
   rewrite: "Mise à jour des scènes",
+  remap: "Périphériques",
   swap: "Mise en place",
+  warning: "Avertissement",
 };
 
 listen<Progress>("streampod://progress", (event) => {
