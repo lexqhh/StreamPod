@@ -21,9 +21,14 @@ const NO_CONFIG_MSG: &str =
     "Aucune configuration OBS trouvée sur cet ordinateur (dossier obs-studio introuvable). \
      OBS a-t-il déjà été lancé ici ?";
 
+/// Appelée périodiquement par l'interface : asynchrone pour que la lecture du
+/// registre et l'énumération des processus ne bloquent jamais le thread
+/// principal, y compris pendant une sauvegarde.
 #[tauri::command]
-fn detect_obs() -> obs::ObsInfo {
-    obs::detect()
+async fn detect_obs() -> Result<obs::ObsInfo, String> {
+    tauri::async_runtime::spawn_blocking(obs::detect)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Demande l'annulation de la sauvegarde ou restauration en cours. Coopératif :
