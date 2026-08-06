@@ -126,10 +126,18 @@ const SCREENS = [
 ] as const;
 type Screen = (typeof SCREENS)[number];
 
+/** Écran affiché : le verrou OBS a besoin de savoir où poser son motif, et
+ *  l'état n'était jusqu'ici lisible que via la classe `hidden` du DOM. */
+let ecranCourant: Screen = "home";
+
 function show(screen: Screen) {
+  ecranCourant = screen;
   for (const s of SCREENS) {
     $(`screen-${s}`).classList.toggle("hidden", s !== screen);
   }
+  // Le motif dépend de l'écran, et les écrans de résumé reconstruisent leurs
+  // avertissements juste avant d'appeler show() : on le repose ici.
+  appliquerVerrouObs();
   window.scrollTo({ top: 0, left: 0 });
   // Accessibilité : replacer le focus sur le titre du nouvel écran, sinon
   // il reste sur un élément passé en display:none (clavier/lecteur d'écran perdus).
@@ -207,6 +215,24 @@ let obsRunning = false;
  *  recalculer l'état de « Restaurer maintenant » sans écraser cette règle. */
 let restoreObsInstalled = true;
 
+/** Pose ou retire le motif du verrou en tête d'un conteneur d'avertissements.
+ *  Le motif est cloné depuis l'accueil : un seul texte à maintenir, dans
+ *  index.html. Le marqueur `data-obs-lock` évite les doublons au fil du sondage
+ *  et permet de le retirer sans toucher aux avertissements métier. */
+function majMotifVerrou(idConteneur: string, visible: boolean) {
+  const conteneur = $(idConteneur);
+  const existant = conteneur.querySelector("[data-obs-lock]");
+  if (visible && !existant) {
+    const modele = $("home-obs-lock").querySelector(".warning-item");
+    if (!modele) return;
+    const motif = modele.cloneNode(true) as HTMLElement;
+    motif.dataset.obsLock = "";
+    conteneur.prepend(motif);
+  } else if (!visible && existant) {
+    existant.remove();
+  }
+}
+
 /** Verrouille tout ce qui mène à une écriture tant qu'OBS est ouvert : refuser
  *  au dernier moment ferait perdre à l'utilisateur ses choix de remappage. */
 function appliquerVerrouObs() {
@@ -224,7 +250,11 @@ function appliquerVerrouObs() {
   $<HTMLButtonElement>("btn-continue-restore").disabled = obsRunning;
   // Le bouton Annuler de l'écran de progression n'est jamais verrouillé ici :
   // il reste utilisable même si OBS est lancé pendant une opération.
-  $("home-obs-lock").classList.toggle("hidden", !obsRunning);
+  // Le motif suit l'utilisateur : encart de l'accueil, ou note en tête des
+  // avertissements de l'écran de résumé, sinon le bouton grisé reste inexpliqué.
+  $("home-obs-lock").classList.toggle("hidden", !obsRunning || ecranCourant !== "home");
+  majMotifVerrou("backup-warnings", obsRunning && ecranCourant === "backup-preview");
+  majMotifVerrou("restore-warnings", obsRunning && ecranCourant === "restore-preview");
 }
 
 async function refreshObsStatus(): Promise<ObsInfo | null> {
