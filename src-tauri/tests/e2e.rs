@@ -99,6 +99,11 @@ fn build_fake_config(root: &Path, asset: &Path) {
     let logs = root.join("logs");
     fs::create_dir_all(&logs).unwrap();
     fs::write(logs.join("2026-07-16.txt"), "log inutile").unwrap();
+
+    // Marqueur laissé par OBS après un arrêt non propre.
+    let sentinel = root.join(".sentinel");
+    fs::create_dir_all(&sentinel).unwrap();
+    fs::write(sentinel.join("run_0001"), "").unwrap();
 }
 
 /// Construit un faux dossier d'installation OBS avec un plugin tiers.
@@ -180,6 +185,10 @@ fn backup_puis_restore_round_trip() {
     );
     assert!(!names.iter().any(|n| n.contains("win-capture")));
     assert!(!names.iter().any(|n| n.starts_with("config/logs/")));
+    assert!(
+        !names.iter().any(|n| n.starts_with("config/.sentinel")),
+        "le marqueur d'arrêt non propre déclencherait le mode sans échec sur le PC cible"
+    );
     assert!(
         !names.iter().any(|n| n.contains("obs-browser")),
         "les cookies des docks navigateur ne doivent pas être sauvegardés"
@@ -279,6 +288,7 @@ fn backup_puis_restore_round_trip() {
 
     // La config est en place.
     assert!(config_dst.join("global.ini").is_file());
+    assert!(!config_dst.join(".sentinel").exists());
     assert!(config_dst
         .join("basic")
         .join("profiles")

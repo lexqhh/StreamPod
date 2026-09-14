@@ -166,4 +166,25 @@ fn archive_piegee_refusee_sans_ecriture_hors_bac_a_sable() {
             .exists(),
         "des fichiers de plugin ont été écrits depuis l'archive"
     );
+
+    // Scénario 5 (ancienne_archive_avec_sentinelle_restauree_sans_mode_sans_echec) :
+    // une archive v0.1.1 contenant config/.sentinel/ se restaure sans erreur,
+    // mais sans le marqueur - sinon OBS proposerait le mode sans échec.
+    std::thread::sleep(std::time::Duration::from_millis(1100)); // horodatage du .bak différent
+    let ancienne = root.join("ancienne.obsbackup");
+    write_archive(
+        &ancienne,
+        &manifest_minimal(),
+        &[
+            ("config/global.ini", b"[General]\n"),
+            ("config/.sentinel/run_0001", b""),
+        ],
+    );
+    restore::restore(&ancienne, &[], |_| {}, || false)
+        .expect("une ancienne archive avec sentinelle doit se restaurer");
+    assert!(config_dst.join("global.ini").is_file());
+    assert!(
+        !config_dst.join(".sentinel").exists(),
+        "le marqueur d'arrêt non propre a été restauré"
+    );
 }

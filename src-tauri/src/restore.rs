@@ -1,7 +1,7 @@
 //! Pipeline de restauration : fichier .obsbackup → configuration OBS.
 
 use crate::backup::{asset_mapping_from_manifest, Manifest, Progress, MSG_ANNULATION};
-use crate::{devices, obs, remap, scenes};
+use crate::{devices, obs, remap, sanitize, scenes};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -419,6 +419,11 @@ pub fn restore(
             report("extract", format!("Extraction : {name}"), i as u64, total_entries);
 
             if let Some(rel) = name.strip_prefix("config/") {
+                // Entrée exclue à la sauvegarde mais présente dans une archive
+                // plus ancienne (.sentinel/ avant la v0.1.2) : ignorée.
+                if sanitize::is_excluded_config_path(&rel.to_lowercase()) {
+                    continue;
+                }
                 let dest = chemin_relatif_sur(&tmp_config, rel)?;
                 extract_entry(&mut archive, i, &dest)?;
             } else if name.starts_with("assets/") {

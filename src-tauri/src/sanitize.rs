@@ -92,6 +92,9 @@ pub fn is_excluded_config_path(rel: &str) -> bool {
         "crashes",
         "profiler_data",
         "updates",
+        // Marqueur d'arrêt non propre d'OBS : restauré, il déclencherait le
+        // mode sans échec au premier lancement sur le PC cible.
+        ".sentinel",
         // Cookies et sessions des docks navigateur (connexions Twitch/YT).
         "plugin_config/obs-browser",
     ];
@@ -207,5 +210,7 @@ mod tests {
         assert!(is_excluded_config_path("plugin_config/obs-browser/obs_profile_cookies/cookies.sqlite"));
         assert!(!is_excluded_config_path("plugin_config/obs-websocket/config.json"));
         assert!(!is_excluded_config_path("basic/scenes/scenes.json"));
+        assert!(is_excluded_config_path(".sentinel/run_x"));
+        assert!(!is_excluded_config_path("basic/scenes/.sentinel.json"));
     }
 }
