@@ -46,6 +46,7 @@ async fn backup_preview() -> Result<backup::BackupPreview, String> {
         backup::preview(
             &config,
             obs::install_dir().as_deref(),
+            obs::plugins_dir().as_deref(),
             obs::installed_version(),
         )
     })
@@ -67,6 +68,7 @@ async fn backup_create(
         backup::create(
             &config,
             obs::install_dir().as_deref(),
+            obs::plugins_dir().as_deref(),
             obs::installed_version(),
             Path::new(&output_path),
             |p| {

@@ -96,7 +96,7 @@ fn remappage_de_bout_en_bout() {
     let config_src = root.join("obs-studio-src");
     build_fake_config(&config_src);
     let backup_file = root.join("remap.obsbackup");
-    backup::create(&config_src, None, Some("32.0.0".to_string()), &backup_file, |_| {}, || false).unwrap();
+    backup::create(&config_src, None, None, Some("32.0.0".to_string()), &backup_file, |_| {}, || false).unwrap();
     let archive_avant = fs::read(&backup_file).unwrap();
 
     // --- Machine cible : bac à sable + inventaire factice ---

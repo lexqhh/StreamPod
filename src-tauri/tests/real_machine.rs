@@ -49,6 +49,7 @@ fn sauvegarde_reelle_puis_restauration_en_bac_a_sable() {
     let summary = backup::create(
         &config,
         install.as_deref(),
+        obs::plugins_dir().as_deref(),
         version.clone(),
         &backup_file,
         |_| {},

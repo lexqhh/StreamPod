@@ -80,6 +80,22 @@ pub fn install_dir() -> Option<PathBuf> {
     None
 }
 
+/// Dossier des plugins tiers installés hors du dossier d'OBS
+/// (%ProgramData%\obs-studio\plugins), s'il existe.
+/// Surchargeable via STREAMPOD_PLUGINS_DIR (tests).
+pub fn plugins_dir() -> Option<PathBuf> {
+    if let Ok(dir) = std::env::var("STREAMPOD_PLUGINS_DIR") {
+        let p = PathBuf::from(dir);
+        return p.exists().then_some(p);
+    }
+    // Emplacement recommandé par OBS (depuis la 30) pour les installations
+    // manuelles ; le crate `dirs` ne l'expose pas.
+    let p = PathBuf::from(std::env::var_os("ProgramData")?)
+        .join("obs-studio")
+        .join("plugins");
+    p.is_dir().then_some(p)
+}
+
 /// Version d'OBS installée, lue dans le registre Windows.
 /// Surchargeable via STREAMPOD_OBS_VERSION (tests).
 pub fn installed_version() -> Option<String> {

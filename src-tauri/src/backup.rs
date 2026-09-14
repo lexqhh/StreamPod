@@ -239,10 +239,9 @@ fn count_browser_sources(value: &serde_json::Value) -> usize {
     }
 }
 
-/// Détecte les plugins tiers dans le dossier d'installation d'OBS.
-fn third_party_plugins(install_dir: &Path) -> Vec<PluginInfo> {
-    let plugin_dir = install_dir.join("obs-plugins").join("64bit");
-    let mut plugins: Vec<PluginInfo> = std::fs::read_dir(&plugin_dir)
+/// DLL présentes directement dans `dir`.
+fn dlls_du_dossier(dir: &Path) -> impl Iterator<Item = PathBuf> {
+    std::fs::read_dir(dir)
         .into_iter()
         .flatten()
         .flatten()
@@ -250,7 +249,17 @@ fn third_party_plugins(install_dir: &Path) -> Vec<PluginInfo> {
         .filter(|p| {
             p.is_file() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("dll"))
         })
-        .filter_map(|p| {
+}
+
+/// Détecte les plugins tiers aux deux emplacements chargés par OBS :
+/// `<install>\obs-plugins\64bit` (filtré par liste blanche des DLL officielles)
+/// et `%ProgramData%\obs-studio\plugins\<nom>\bin\64bit` (entièrement tiers,
+/// OBS n'y dépose rien). Dédoublonnés par nom sans tenir compte de la casse.
+fn third_party_plugins(install_dir: Option<&Path>, plugins_dir: Option<&Path>) -> Vec<PluginInfo> {
+    let mut plugins: Vec<PluginInfo> = Vec::new();
+    if let Some(install_dir) = install_dir {
+        let plugin_dir = install_dir.join("obs-plugins").join("64bit");
+        plugins.extend(dlls_du_dossier(&plugin_dir).filter_map(|p| {
             let stem = p.file_stem()?.to_string_lossy().to_lowercase();
             if OFFICIAL_PLUGIN_STEMS.contains(&stem.as_str()) {
                 return None;
@@ -263,8 +272,28 @@ fn third_party_plugins(install_dir: &Path) -> Vec<PluginInfo> {
                 size,
                 has_data_dir: data_dir.is_dir(),
             })
-        })
-        .collect();
+        }));
+    }
+    if let Some(plugins_dir) = plugins_dir {
+        for racine in std::fs::read_dir(plugins_dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+        {
+            let has_data_dir = racine.join("data").is_dir();
+            plugins.extend(dlls_du_dossier(&racine.join("bin").join("64bit")).map(|p| {
+                PluginInfo {
+                    name: p.file_stem().unwrap().to_string_lossy().into_owned(),
+                    dll: p.file_name().unwrap().to_string_lossy().into_owned(),
+                    size: p.metadata().map(|m| m.len()).unwrap_or(0),
+                    has_data_dir,
+                }
+            }));
+        }
+    }
+    let mut vus = BTreeSet::new();
+    plugins.retain(|p| vus.insert(p.name.to_lowercase()));
     plugins.sort_by(|a, b| a.name.cmp(&b.name));
     plugins
 }
@@ -273,6 +302,7 @@ fn third_party_plugins(install_dir: &Path) -> Vec<PluginInfo> {
 pub fn preview(
     config_dir: &Path,
     install_dir: Option<&Path>,
+    plugins_dir: Option<&Path>,
     obs_version: Option<String>,
 ) -> Result<BackupPreview, String> {
     if !config_dir.is_dir() {
@@ -297,7 +327,7 @@ pub fn preview(
         .iter()
         .map(|p| p.metadata().map(|m| m.len()).unwrap_or(0))
         .sum();
-    let plugins = install_dir.map(third_party_plugins).unwrap_or_default();
+    let plugins = third_party_plugins(install_dir, plugins_dir);
     Ok(BackupPreview {
         config_dir: config_dir.to_string_lossy().into_owned(),
         obs_version,
@@ -375,6 +405,7 @@ impl Drop for NettoyageTmp<'_> {
 pub fn create(
     config_dir: &Path,
     install_dir: Option<&Path>,
+    plugins_dir: Option<&Path>,
     obs_version: Option<String>,
     output_path: &Path,
     progress: impl Fn(Progress),
@@ -409,7 +440,7 @@ pub fn create(
     }
 
     // 2. Plugins tiers.
-    let plugins = install_dir.map(third_party_plugins).unwrap_or_default();
+    let plugins = third_party_plugins(install_dir, plugins_dir);
 
     let scene_names: Vec<String> = scene_files(config_dir)
         .iter()
@@ -636,8 +667,19 @@ pub fn asset_mapping_from_manifest(manifest: &Manifest) -> BTreeMap<String, Stri
 
 #[cfg(test)]
 mod tests {
-    use super::count_browser_sources;
+    use super::{count_browser_sources, third_party_plugins};
     use serde_json::json;
+
+    #[test]
+    fn dossier_plugins_absent_ou_incomplet_aucun_plugin_sans_erreur() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        assert!(third_party_plugins(None, None).is_empty());
+        assert!(third_party_plugins(None, Some(&dir.path().join("inexistant"))).is_empty());
+        let sans_bin = dir.path().join("plugins").join("obs-shaderfilter");
+        std::fs::create_dir_all(sans_bin.join("data")).unwrap();
+        std::fs::write(sans_bin.join("obs-shaderfilter.dll"), "HORS-BIN").unwrap();
+        assert!(third_party_plugins(None, Some(&dir.path().join("plugins"))).is_empty());
+    }
 
     #[test]
     fn les_sources_navigateur_web_sont_comptees_meme_imbriquees() {

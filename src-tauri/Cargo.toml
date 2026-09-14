@@ -1,6 +1,6 @@
 [package]
 name = "streampod"
-version = "0.1.1"
+version = "0.1.2"
 description = "Sauvegarde et restauration complète d'OBS Studio"
 authors = ["Axel"]
 edition = "2021"
