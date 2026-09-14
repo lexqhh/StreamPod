@@ -117,6 +117,19 @@ fn build_fake_install(root: &Path) {
     fs::write(data.join("locale.ini"), "[fr-FR]\nNom=Move").unwrap();
 }
 
+/// Construit un faux %ProgramData%\obs-studio\plugins : un plugin propre à
+/// cet emplacement et un doublon du plugin déjà présent dans l'installation.
+fn build_fake_plugins_dir(root: &Path) {
+    let shader = root.join("plugins").join("obs-shaderfilter");
+    fs::create_dir_all(shader.join("bin").join("64bit")).unwrap();
+    fs::write(shader.join("bin").join("64bit").join("obs-shaderfilter.dll"), "PLUGIN-TIERS").unwrap();
+    fs::create_dir_all(shader.join("data").join("locale")).unwrap();
+    fs::write(shader.join("data").join("locale").join("fr-FR.ini"), "Nom=Shader").unwrap();
+    let doublon = root.join("plugins").join("move-transition").join("bin").join("64bit");
+    fs::create_dir_all(&doublon).unwrap();
+    fs::write(doublon.join("move-transition.dll"), "PLUGIN-TIERS").unwrap();
+}
+
 #[test]
 fn backup_puis_restore_round_trip() {
     let tmp = tempfile::tempdir().unwrap();
@@ -131,6 +144,8 @@ fn backup_puis_restore_round_trip() {
     build_fake_config(&config_src, &asset);
     let install_src = root.join("obs-install-src");
     build_fake_install(&install_src);
+    let programdata_src = root.join("programdata-src");
+    build_fake_plugins_dir(&programdata_src);
 
     // --- Sauvegarde ---
     let backup_file = root.join("ma-sauvegarde.obsbackup");
@@ -138,6 +153,7 @@ fn backup_puis_restore_round_trip() {
     let summary = backup::create(
         &config_src,
         Some(&install_src),
+        Some(&programdata_src.join("plugins")),
         Some("31.0.2".to_string()),
         &backup_file,
         |p| {
@@ -166,7 +182,7 @@ fn backup_puis_restore_round_trip() {
     );
     assert_eq!(summary.scene_collections, 1);
     assert_eq!(summary.profiles, 1);
-    assert_eq!(summary.plugins, 1, "seul le plugin tiers doit être inclus");
+    assert_eq!(summary.plugins, 2, "seuls les plugins tiers, sans doublon, doivent être inclus");
     assert_eq!(summary.assets, 1);
     assert!(
         !backup_file.with_extension("obsbackup.tmp").exists(),
@@ -183,7 +199,21 @@ fn backup_puis_restore_round_trip() {
         !names.iter().any(|n| n.starts_with("plugins/")),
         "les DLL de plugins ne sont plus archivées (jamais restaurées : seul le manifest liste les plugins)"
     );
+    assert!(
+        !names.iter().any(|n| n.to_lowercase().ends_with(".dll")),
+        "aucune DLL ne doit être archivée"
+    );
     assert!(!names.iter().any(|n| n.contains("win-capture")));
+
+    let mut manifest_text = String::new();
+    zip.by_name("manifest.json")
+        .unwrap()
+        .read_to_string(&mut manifest_text)
+        .unwrap();
+    let manifest: backup::Manifest = serde_json::from_str(&manifest_text).unwrap();
+    let noms: Vec<&str> = manifest.plugins.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(noms, ["move-transition", "obs-shaderfilter"]);
+    assert!(manifest.plugins[1].has_data_dir);
     assert!(!names.iter().any(|n| n.starts_with("config/logs/")));
     assert!(
         !names.iter().any(|n| n.starts_with("config/.sentinel")),
@@ -324,7 +354,7 @@ fn backup_puis_restore_round_trip() {
         .join("move-transition")
         .join("locale.ini")
         .exists());
-    assert_eq!(result.plugins, vec!["move-transition".to_string()]);
+    assert_eq!(result.plugins, vec!["move-transition".to_string(), "obs-shaderfilter".to_string()]);
 
     // Aucun secret dans la config restaurée.
     let service_text = fs::read_to_string(
@@ -396,7 +426,7 @@ fn diagnostic_remappage_en_lecture_seule() {
 
     // --- Sauvegarde ---
     let backup_file = root.join("diag.obsbackup");
-    backup::create(&config_src, None, Some("32.1.2".to_string()), &backup_file, |_| {}, || false).unwrap();
+    backup::create(&config_src, None, None, Some("32.1.2".to_string()), &backup_file, |_| {}, || false).unwrap();
     let archive_avant = fs::read(&backup_file).unwrap();
 
     // --- Inventaire cible factice : le micro « valide » existe encore, la
@@ -488,14 +518,14 @@ fn backup_refuse_destination_dans_le_dossier_de_config() {
         config_src.join("piege.obsbackup"),
         config_src.join("basic").join("piege.obsbackup"),
     ] {
-        let err = backup::create(&config_src, None, None, &destination, |_| {}, || false)
+        let err = backup::create(&config_src, None, None, None, &destination, |_| {}, || false)
             .expect_err("une destination dans le dossier de config doit être refusée");
         assert!(err.contains("dossier de configuration"), "{err}");
         assert!(!destination.exists(), "aucun fichier ne doit être créé");
     }
 
     // Une destination ailleurs reste acceptée.
-    backup::create(&config_src, None, None, &root.join("ok.obsbackup"), |_| {}, || false).unwrap();
+    backup::create(&config_src, None, None, None, &root.join("ok.obsbackup"), |_| {}, || false).unwrap();
 }
 
 #[test]
@@ -520,7 +550,7 @@ fn backup_echoue_sans_laisser_de_fichier_incomplet() {
     .unwrap();
 
     let destination = root.join("echec.obsbackup");
-    backup::create(&config_src, None, None, &destination, |_| {}, || false)
+    backup::create(&config_src, None, None, None, &destination, |_| {}, || false)
         .expect_err("un service.json corrompu doit faire échouer la sauvegarde");
     assert!(
         !destination.exists(),
