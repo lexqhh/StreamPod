@@ -109,7 +109,8 @@ Pendant une restauration, l'annulation n'est plus possible une fois la mise en
 place de la configuration engagée - l'opération va alors jusqu'au bout pour ne
 jamais laisser OBS sans configuration.
 
-À propos des **plugins tiers** : la liste des plugins installés est enregistrée,
+À propos des **plugins tiers** : les plugins sont repérés dans le dossier d'OBS
+**et** dans `C:\ProgramData\obs-studio\plugins`. Leur liste est enregistrée,
 mais leurs DLL ne sont **jamais** réinstallées depuis l'archive - une DLL issue
 d'un fichier est du code non vérifié. StreamPod affiche simplement la liste des
 plugins à réinstaller manuellement depuis leurs sites officiels.
@@ -118,6 +119,7 @@ plugins à réinstaller manuellement depuis leurs sites officiels.
 
 StreamPod est une application **Windows** (10/11). OBS Studio doit avoir été lancé au
 moins une fois sur la machine pour que son dossier de configuration existe.
+Testé avec OBS Studio 32.2.2.
 
 Le plus simple est de récupérer l'exécutable portable produit par la
 compilation (voir [Développement](#développement)) : `StreamPod.exe` se lance sans
