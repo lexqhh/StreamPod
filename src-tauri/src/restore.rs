@@ -7,7 +7,7 @@ use crate::{devices, obs, remap, sanitize, scenes};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fs::File;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use zip::ZipArchive;
 
@@ -17,6 +17,22 @@ fn err(context: &str, e: impl std::fmt::Display) -> String {
 
 fn chemin_suspect(rel: &str) -> String {
     format!("Archive invalide ou malveillante : chemin suspect \"{rel}\".")
+}
+
+/// Nom de périphérique réservé par Windows (`CON`, `NUL`, `COM1`…), avec ou
+/// sans extension : `NUL.txt` désigne encore le périphérique.
+fn nom_reserve_windows(comp: &str) -> bool {
+    const RESERVES: &[&str] = &["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"];
+    let base = comp
+        .split('.')
+        .next()
+        .unwrap_or(comp)
+        .trim_end()
+        .to_ascii_uppercase();
+    RESERVES.contains(&base.as_str())
+        || ((base.starts_with("COM") || base.starts_with("LPT"))
+            && base.len() == 4
+            && matches!(base.as_bytes()[3], b'1'..=b'9'))
 }
 
 /// Joint un chemin relatif issu de l'archive (séparé par des `/`) sous `base`,
@@ -38,6 +54,10 @@ pub(crate) fn chemin_relatif_sur(base: &Path, rel: &str) -> Result<PathBuf, Stri
             || comp.contains('\\')
             || comp.contains(':')
             || comp.chars().any(char::is_control)
+            // Windows retire le point ou l'espace final à la création :
+            // `obs-browser.` atterrirait dans `obs-browser`, exclu.
+            || comp.ends_with(['.', ' '])
+            || nom_reserve_windows(comp)
         {
             return Err(suspect());
         }
@@ -64,6 +84,7 @@ pub struct RestorePreview {
     /// Une configuration OBS existe déjà et sera remplacée (après copie de
     /// sécurité automatique).
     pub config_exists: bool,
+    pub services: Vec<ServiceProfil>,
     pub warnings: Vec<String>,
 }
 
@@ -84,6 +105,9 @@ pub struct RestoreSummary {
     /// Nombre de sources dont le périphérique a été remplacé selon les choix
     /// de l'utilisateur.
     pub sources_remappees: usize,
+    /// Scripts retirés des collections, à réactiver à la main dans OBS
+    /// (Outils → Scripts) : chemins après restauration.
+    pub scripts: Vec<String>,
 }
 
 pub(crate) fn open_archive(backup_path: &Path) -> Result<ZipArchive<File>, String> {
@@ -93,14 +117,35 @@ pub(crate) fn open_archive(backup_path: &Path) -> Result<ZipArchive<File>, Strin
         .map_err(|e| err("Ce fichier n'est pas une sauvegarde .obsbackup valide", e))
 }
 
-fn read_manifest(archive: &mut ZipArchive<File>) -> Result<Manifest, String> {
-    let mut entry = archive
-        .by_name("manifest.json")
-        .map_err(|_| "Sauvegarde invalide : manifest.json manquant.".to_string())?;
+/// Plafonds de décompression : une archive très compressible (bombe ZIP) ne
+/// doit saturer ni la mémoire à l'aperçu, ni le disque à l'extraction.
+const TAILLE_MAX_MANIFEST: u64 = 16 * 1024 * 1024;
+const TAILLE_MAX_SERVICE: u64 = 1024 * 1024;
+const TAILLE_MAX_ENTREE_CONFIG: u64 = 256 * 1024 * 1024;
+const TAILLE_MAX_TOTAL_CONFIG: u64 = 1024 * 1024 * 1024;
+
+fn trop_volumineux(nom: &str) -> String {
+    format!("Archive invalide ou malveillante : « {nom} » dépasse la taille autorisée.")
+}
+
+/// Lit une entrée texte sans jamais décompresser plus de `limite` octets.
+fn lire_texte_borne(entry: impl Read, limite: u64, nom: &str) -> Result<String, String> {
     let mut text = String::new();
     entry
+        .take(limite + 1)
         .read_to_string(&mut text)
-        .map_err(|e| err("Lecture du manifest", e))?;
+        .map_err(|e| err(&format!("Lecture de {nom}"), e))?;
+    if text.len() as u64 > limite {
+        return Err(trop_volumineux(nom));
+    }
+    Ok(text)
+}
+
+fn read_manifest(archive: &mut ZipArchive<File>) -> Result<Manifest, String> {
+    let entry = archive
+        .by_name("manifest.json")
+        .map_err(|_| "Sauvegarde invalide : manifest.json manquant.".to_string())?;
+    let text = lire_texte_borne(entry, TAILLE_MAX_MANIFEST, "manifest.json")?;
     let valeur: serde_json::Value =
         serde_json::from_str(&text).map_err(|e| err("Manifest illisible", e))?;
     // Vérifié avant la désérialisation complète : un format futur peut avoir
@@ -120,10 +165,62 @@ fn read_manifest(archive: &mut ZipArchive<File>) -> Result<Manifest, String> {
     serde_json::from_value(valeur).map_err(|e| err("Manifest illisible", e))
 }
 
+/// Service de diffusion d'un profil (`basic/profiles/<profil>/service.json`).
+#[derive(Debug, Clone, Serialize)]
+pub struct ServiceProfil {
+    pub profil: String,
+    /// `rtmp_common` (service connu) ou `rtmp_custom` (serveur personnalisé)…
+    pub type_service: String,
+    pub service: Option<String>,
+    pub serveur: Option<String>,
+}
+
+/// Lit le service et le serveur de chaque profil de l'archive : une archive
+/// fournie par un tiers peut diriger le flux (et la clé re-saisie) vers son
+/// propre serveur.
+fn lire_services(archive: &mut ZipArchive<File>) -> Result<Vec<ServiceProfil>, String> {
+    let mut services = Vec::new();
+    for i in 0..archive.len() {
+        let entry = archive
+            .by_index(i)
+            .map_err(|e| err("Lecture de l'archive", e))?;
+        let nom = entry.name().to_string();
+        let Some(profil) = nom
+            .strip_prefix("config/basic/profiles/")
+            .and_then(|r| r.split_once('/'))
+            .filter(|(_, f)| f.eq_ignore_ascii_case("service.json"))
+            .map(|(p, _)| p.to_string())
+        else {
+            continue;
+        };
+        let text = lire_texte_borne(entry, TAILLE_MAX_SERVICE, &nom)?;
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&text) else {
+            continue;
+        };
+        let champ = |c: &str| {
+            v.pointer(&format!("/settings/{c}"))
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_string)
+        };
+        services.push(ServiceProfil {
+            profil,
+            type_service: v
+                .get("type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            service: champ("service"),
+            serveur: champ("server"),
+        });
+    }
+    Ok(services)
+}
+
 /// Lit une sauvegarde et prépare le résumé avant restauration.
 pub fn preview(backup_path: &Path) -> Result<RestorePreview, String> {
     let mut archive = open_archive(backup_path)?;
     let manifest = read_manifest(&mut archive)?;
+    let services = lire_services(&mut archive)?;
 
     let install_dir = obs::install_dir();
     let installed_version = obs::installed_version();
@@ -165,6 +262,19 @@ pub fn preview(backup_path: &Path) -> Result<RestorePreview, String> {
                 .to_string(),
         );
     }
+    for s in services.iter().filter(|s| s.type_service == "rtmp_custom") {
+        warnings.push(format!(
+            "Le profil « {} » diffuse vers un serveur personnalisé ({}). Vérifiez qu'il \
+             s'agit bien du vôtre avant de saisir votre clé de stream.",
+            s.profil,
+            s.serveur.as_deref().unwrap_or("non renseigné")
+        ));
+    }
+    warnings.push(
+        "Ne restaurez que vos propres sauvegardes ou celles de personnes de confiance : \
+         leurs réglages s'appliqueront à votre OBS."
+            .to_string(),
+    );
 
     Ok(RestorePreview {
         manifest,
@@ -172,12 +282,23 @@ pub fn preview(backup_path: &Path) -> Result<RestorePreview, String> {
         obs_installed,
         installed_version,
         config_exists,
+        services,
         warnings,
     })
 }
 
-/// Extrait une entrée du ZIP vers un fichier sur le disque.
-fn extract_entry(archive: &mut ZipArchive<File>, index: usize, dest: &Path) -> Result<(), String> {
+/// Extrait une entrée du ZIP vers un fichier sur le disque, par blocs de
+/// 512 Ko. Les plafonds portent sur les octets réellement écrits (la taille
+/// déclarée dans l'archive n'est pas fiable) : `plafond` pour l'entrée,
+/// `budget` pour le cumul, décrémenté au fil de l'eau.
+fn extract_entry(
+    archive: &mut ZipArchive<File>,
+    index: usize,
+    dest: &Path,
+    plafond: u64,
+    budget: &mut u64,
+    est_annule: &dyn Fn() -> bool,
+) -> Result<(), String> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| err(&format!("Création du dossier {}", parent.display()), e))?;
@@ -187,9 +308,24 @@ fn extract_entry(archive: &mut ZipArchive<File>, index: usize, dest: &Path) -> R
         .map_err(|e| err("Lecture de l'archive", e))?;
     let mut out =
         File::create(dest).map_err(|e| err(&format!("Création de {}", dest.display()), e))?;
-    std::io::copy(&mut entry, &mut out)
-        .map_err(|e| err(&format!("Extraction vers {}", dest.display()), e))?;
-    Ok(())
+    let extraction = |e| err(&format!("Extraction vers {}", dest.display()), e);
+    let mut buf = vec![0u8; 512 * 1024];
+    let mut ecrits = 0u64;
+    loop {
+        if est_annule() {
+            return Err(MSG_ANNULATION.to_string());
+        }
+        let n = entry.read(&mut buf).map_err(extraction)?;
+        if n == 0 {
+            return Ok(());
+        }
+        ecrits += n as u64;
+        if ecrits > plafond || n as u64 > *budget {
+            return Err(trop_volumineux(entry.name()));
+        }
+        *budget -= n as u64;
+        out.write_all(&buf[..n]).map_err(extraction)?;
+    }
 }
 
 /// Bascule la nouvelle configuration (`tmp`) à la place de l'ancienne
@@ -262,15 +398,15 @@ fn basculer_config_avec(
 struct DestinationAsset {
     transit: PathBuf,
     finale: PathBuf,
+    /// Taille déclarée au manifest : plafond d'extraction de l'entrée.
+    taille: u64,
 }
 
-/// Déplace les assets du dossier de transit vers leur emplacement définitif.
-/// Les fichiers créés (absents auparavant) sont ajoutés à `installes` au fil
-/// de l'eau, pour pouvoir les retirer si la suite de la restauration échoue.
-///
-/// En cas de collision (un asset du même nom au même index existe déjà, par
-/// exemple laissé par une restauration précédente), le fichier est écrasé -
-/// même comportement qu'avant - et n'est pas retiré en cas de rollback.
+/// Déplace les assets du dossier de transit vers leur emplacement définitif,
+/// propre à cette restauration (`OBS-Backup-Assets\<horodatage>\…`) : aucun
+/// fichier existant n'est jamais écrasé. Les fichiers déplacés sont ajoutés
+/// à `installes` au fil de l'eau, pour pouvoir les retirer si la suite de la
+/// restauration échoue.
 fn installer_assets(
     destinations: &BTreeMap<String, DestinationAsset>,
     installes: &mut Vec<PathBuf>,
@@ -280,47 +416,83 @@ fn installer_assets(
         if !dest.transit.is_file() {
             continue;
         }
+        if dest.finale.exists() {
+            return Err(format!(
+                "Le fichier {} existe déjà : restauration interrompue pour ne rien écraser.",
+                dest.finale.display()
+            ));
+        }
         if let Some(parent) = dest.finale.parent() {
             std::fs::create_dir_all(parent)
                 .map_err(|e| err(&format!("Création du dossier {}", parent.display()), e))?;
         }
-        let existait = dest.finale.exists();
-        if existait {
-            std::fs::remove_file(&dest.finale)
-                .map_err(|e| err(&format!("Remplacement de {}", dest.finale.display()), e))?;
-        }
         std::fs::rename(&dest.transit, &dest.finale)
             .map_err(|e| err(&format!("Mise en place de {}", dest.finale.display()), e))?;
-        if !existait {
-            installes.push(dest.finale.clone());
-        }
+        installes.push(dest.finale.clone());
     }
     Ok(())
 }
 
 /// Retire (best effort) les assets installés par une restauration qui a
-/// échoué ensuite, ainsi que leurs sous-dossiers devenus vides.
+/// échoué ensuite, ainsi que leurs dossiers (`<n>` puis `<horodatage>`)
+/// devenus vides.
 fn retirer_assets(installes: &[PathBuf]) {
     for fichier in installes {
         let _ = std::fs::remove_file(fichier);
-        if let Some(parent) = fichier.parent() {
-            // Ne supprime le dossier que s'il est vide.
-            let _ = std::fs::remove_dir(parent);
+        // remove_dir échoue sur un dossier non vide : rien d'autre n'est touché.
+        for dossier in fichier.ancestors().skip(1).take(2) {
+            let _ = std::fs::remove_dir(dossier);
         }
     }
 }
 
+/// Applique la neutralisation d'obs-websocket à une config extraite, quoi que
+/// dise l'archive (ancienne ou piégée) ; un JSON illisible est retiré, OBS
+/// recrée alors ses réglages par défaut.
+fn neutraliser_obs_websocket_extrait(config_dir: &Path) -> Result<(), String> {
+    let ws = config_dir
+        .join("plugin_config")
+        .join("obs-websocket")
+        .join("config.json");
+    if !ws.is_file() {
+        return Ok(());
+    }
+    match std::fs::read_to_string(&ws)
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+    {
+        Some(mut v) if v.is_object() => {
+            sanitize::neutraliser_obs_websocket(&mut v);
+            std::fs::write(&ws, serde_json::to_string_pretty(&v).unwrap())
+                .map_err(|e| err(&format!("Écriture de {}", ws.display()), e))
+        }
+        _ => std::fs::remove_file(&ws)
+            .map_err(|e| err(&format!("Suppression de {}", ws.display()), e)),
+    }
+}
+
 /// Restaure une sauvegarde .obsbackup en appliquant les choix de remappage
-/// matériel confirmés par l'utilisateur (`choix` peut être vide).
-///
-/// Le refus si OBS tourne est à la charge de l'appelant (commande `restore_run`
-/// dans lib.rs, comme `backup_create`) : la restauration elle-même reste ainsi
-/// testable sans dépendre des processus de la machine.
+/// matériel confirmés par l'utilisateur (`choix` peut être vide), sans
+/// revérifier OBS : voir `restore_avec_garde`.
 pub fn restore(
     backup_path: &Path,
     choix: &[remap::Choix],
     progress: impl Fn(Progress),
     est_annule: impl Fn() -> bool,
+) -> Result<RestoreSummary, String> {
+    restore_avec_garde(backup_path, choix, progress, est_annule, || false)
+}
+
+/// Comme `restore`, mais `obs_ouvert` (injectable en test) est revérifié
+/// juste avant la bascule : OBS a pu être lancé pendant l'extraction. Le
+/// refus initial si OBS tourne reste à la charge de l'appelant (commande
+/// `restore_run` dans lib.rs).
+pub fn restore_avec_garde(
+    backup_path: &Path,
+    choix: &[remap::Choix],
+    progress: impl Fn(Progress),
+    est_annule: impl Fn() -> bool,
+    obs_ouvert: impl Fn() -> bool,
 ) -> Result<RestoreSummary, String> {
     let report = |step: &str, message: String, current: u64, total: u64| {
         progress(Progress {
@@ -363,19 +535,27 @@ pub fn restore(
     // 2. Extraction des assets vers un dossier de transit voisin du dossier
     //    définitif (même volume, donc mise en place par simple rename) :
     //    le dossier d'assets définitif n'est touché qu'une fois toute la
-    //    préparation réussie.
-    let assets_dir = obs::assets_target_dir();
+    //    préparation réussie. Chaque restauration a son propre sous-dossier
+    //    horodaté : rien d'existant n'est écrasé.
+    let racine_assets = obs::assets_target_dir();
+    let assets_dir = racine_assets.as_ref().map(|d| d.join(&stamp));
     let mut asset_dest_by_archive_path: BTreeMap<String, DestinationAsset> = BTreeMap::new();
     let mut tmp_assets: Option<PathBuf> = None;
     if !manifest.assets.is_empty() {
-        let assets_dir = assets_dir
-            .as_ref()
-            .ok_or("Impossible de déterminer le dossier Documents pour les assets.")?;
-        let transit = assets_dir.with_file_name(format!(
+        let (Some(racine), Some(assets_dir)) = (&racine_assets, &assets_dir) else {
+            return Err("Impossible de déterminer le dossier Documents pour les assets.".into());
+        };
+        let transit = racine.with_file_name(format!(
             "{}.tmp-{stamp}",
-            assets_dir.file_name().unwrap_or_default().to_string_lossy()
+            racine.file_name().unwrap_or_default().to_string_lossy()
         ));
         for asset in &manifest.assets {
+            // Exécutable déclaré par le manifest : ni extrait ni référencé.
+            if scenes::est_executable(&asset.archive_path)
+                || scenes::est_executable(&asset.original_path)
+            {
+                continue;
+            }
             // archive_path = assets/<n>/<nom> → <assets_dir>/<n>/<nom>.
             // Chemin lu depuis le manifest, donc contrôlé par l'auteur de
             // l'archive : préfixe `assets/` obligatoire, puis même validation
@@ -389,6 +569,7 @@ pub fn restore(
                 DestinationAsset {
                     transit: chemin_relatif_sur(&transit, rel)?,
                     finale: chemin_relatif_sur(assets_dir, rel)?,
+                    taille: asset.size,
                 },
             );
         }
@@ -421,8 +602,12 @@ pub fn restore(
     // seulement listés (manifest.plugins) pour réinstallation manuelle
     // depuis leurs sites officiels.
     let scenes_dir = tmp_config.join("basic").join("scenes");
-    let preparation = (|| -> Result<(usize, usize), String> {
+    let preparation = (|| -> Result<(usize, usize, Vec<String>), String> {
         let mut assets_restored = 0usize;
+        // Budgets de décompression : la config est bornée forfaitairement,
+        // les assets par les tailles déclarées au manifest.
+        let mut budget_config = TAILLE_MAX_TOTAL_CONFIG;
+        let mut budget_assets: u64 = asset_dest_by_archive_path.values().map(|d| d.taille).sum();
         for i in 0..archive.len() {
             if est_annule() {
                 return Err(MSG_ANNULATION.to_string());
@@ -450,14 +635,30 @@ pub fn restore(
                     continue;
                 }
                 let dest = chemin_relatif_sur(&tmp_config, rel)?;
-                extract_entry(&mut archive, i, &dest)?;
+                extract_entry(
+                    &mut archive,
+                    i,
+                    &dest,
+                    TAILLE_MAX_ENTREE_CONFIG,
+                    &mut budget_config,
+                    &est_annule,
+                )?;
             } else if name.starts_with("assets/") {
                 if let Some(dest) = asset_dest_by_archive_path.get(&name) {
-                    extract_entry(&mut archive, i, &dest.transit)?;
+                    extract_entry(
+                        &mut archive,
+                        i,
+                        &dest.transit,
+                        dest.taille,
+                        &mut budget_assets,
+                        &est_annule,
+                    )?;
                     assets_restored += 1;
                 }
             }
         }
+
+        neutraliser_obs_websocket_extrait(&tmp_config)?;
 
         // 3. Réécriture des chemins d'assets dans les scènes extraites, avec
         //    les chemins définitifs (les assets n'y seront déplacés qu'à
@@ -472,7 +673,11 @@ pub fn restore(
                 );
             }
         }
-        if scenes_dir.is_dir() && !mapping.is_empty() {
+        // Les scripts (modules["scripts-tool"]) sont neutralisés dans toutes
+        // les collections : OBS les exécuterait au lancement. Leurs fichiers
+        // restent restaurés avec les assets, pour réactivation manuelle.
+        let mut scripts: Vec<String> = Vec::new();
+        if scenes_dir.is_dir() {
             for entry in std::fs::read_dir(&scenes_dir)
                 .map_err(|e| err("Lecture des scènes restaurées", e))?
                 .flatten()
@@ -489,7 +694,12 @@ pub fn restore(
                 let Ok(mut value) = serde_json::from_str::<serde_json::Value>(&text) else {
                     continue;
                 };
-                scenes::rewrite_asset_paths(&mut value, &mapping);
+                let reecrits = scenes::rewrite_asset_paths(&mut value, &mapping);
+                let retires = scenes::retirer_scripts(&mut value);
+                if reecrits == 0 && retires.is_empty() {
+                    continue;
+                }
+                scripts.extend(retires);
                 std::fs::write(&path, serde_json::to_string_pretty(&value).unwrap())
                     .map_err(|e| err(&format!("Écriture de {}", path.display()), e))?;
             }
@@ -502,9 +712,9 @@ pub fn restore(
             report("remap", "Remplacement des périphériques…".into(), 0, 1);
             sources_remappees = remap::appliquer(&scenes_dir, &choix_valides)?;
         }
-        Ok((assets_restored, sources_remappees))
+        Ok((assets_restored, sources_remappees, scripts))
     })();
-    let (assets_restored, sources_remappees) = match preparation {
+    let (assets_restored, sources_remappees, scripts) = match preparation {
         Ok(compteurs) => compteurs,
         Err(e) => {
             nettoyer_temporaires();
@@ -537,6 +747,14 @@ pub fn restore(
         let _ = std::fs::remove_dir_all(transit);
     }
 
+    // OBS lancé pendant l'extraction : il réécrirait sa config par-dessus la
+    // restauration à sa fermeture. Rien n'a encore basculé.
+    if obs_ouvert() {
+        retirer_assets(&assets_installes);
+        nettoyer_temporaires();
+        return Err(obs::OBS_RUNNING_MSG.to_string());
+    }
+
     // 6. Bascule avec rollback : l'ancienne config devient une copie de
     //    sécurité, la nouvelle prend sa place ; en cas d'échec, l'ancienne
     //    configuration est remise en place automatiquement et les assets
@@ -565,6 +783,7 @@ pub fn restore(
         plugins: manifest.plugins.iter().map(|p| p.name.clone()).collect(),
         previous_config_backup: previous_backup,
         sources_remappees,
+        scripts,
     })
 }
 
@@ -691,64 +910,80 @@ mod tests {
     }
 
     #[test]
-    fn installation_des_assets_deplace_et_ne_liste_que_les_nouveaux() {
+    fn installation_des_assets_deplace_sans_jamais_ecraser() {
         let dir = tempfile::tempdir().expect("tempdir");
         let transit = dir.path().join("OBS-Backup-Assets.tmp-test");
-        let finale = dir.path().join("OBS-Backup-Assets");
+        let finale = dir.path().join("OBS-Backup-Assets").join("20260101-120000");
         std::fs::create_dir_all(transit.join("0")).unwrap();
         std::fs::create_dir_all(transit.join("1")).unwrap();
         std::fs::write(transit.join("0").join("overlay.png"), "nouveau 0").unwrap();
         std::fs::write(transit.join("1").join("alerte.mp3"), "nouveau 1").unwrap();
-        // Collision : un asset au même index/nom existe déjà (restauration
-        // précédente) - il est écrasé et ne compte pas comme « nouveau ».
-        std::fs::create_dir_all(finale.join("0")).unwrap();
-        std::fs::write(finale.join("0").join("overlay.png"), "ancien").unwrap();
 
-        let mut destinations = BTreeMap::new();
-        for rel in ["0/overlay.png", "1/alerte.mp3"] {
-            destinations.insert(
-                format!("assets/{rel}"),
-                DestinationAsset {
-                    transit: chemin_relatif_sur(&transit, rel).unwrap(),
-                    finale: chemin_relatif_sur(&finale, rel).unwrap(),
-                },
-            );
-        }
+        let destinations = |rels: &[&str]| -> BTreeMap<String, DestinationAsset> {
+            rels.iter()
+                .map(|rel| {
+                    (
+                        format!("assets/{rel}"),
+                        DestinationAsset {
+                            transit: chemin_relatif_sur(&transit, rel).unwrap(),
+                            finale: chemin_relatif_sur(&finale, rel).unwrap(),
+                            taille: 9,
+                        },
+                    )
+                })
+                .collect()
+        };
         let mut installes = Vec::new();
-        installer_assets(&destinations, &mut installes).unwrap();
-
+        installer_assets(
+            &destinations(&["0/overlay.png", "1/alerte.mp3"]),
+            &mut installes,
+        )
+        .unwrap();
         assert_eq!(
             std::fs::read_to_string(finale.join("0").join("overlay.png")).unwrap(),
             "nouveau 0"
         );
         assert_eq!(
-            std::fs::read_to_string(finale.join("1").join("alerte.mp3")).unwrap(),
-            "nouveau 1"
+            installes,
+            vec![
+                finale.join("0").join("overlay.png"),
+                finale.join("1").join("alerte.mp3")
+            ]
         );
-        assert_eq!(installes, vec![finale.join("1").join("alerte.mp3")]);
         assert!(!transit.join("0").join("overlay.png").exists());
+
+        // Collision (même horodatage) : refus, le fichier en place est intact.
+        std::fs::write(transit.join("0").join("overlay.png"), "intrus").unwrap();
+        let mut installes = Vec::new();
+        let e = installer_assets(&destinations(&["0/overlay.png"]), &mut installes)
+            .expect_err("un asset existant ne doit jamais être écrasé");
+        assert!(e.contains("existe déjà"), "{e}");
+        assert!(installes.is_empty());
+        assert_eq!(
+            std::fs::read_to_string(finale.join("0").join("overlay.png")).unwrap(),
+            "nouveau 0"
+        );
     }
 
     #[test]
     fn retrait_des_assets_supprime_fichiers_et_dossiers_vides() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let finale = dir.path().join("OBS-Backup-Assets");
+        let racine = dir.path().join("OBS-Backup-Assets");
+        let finale = racine.join("20260101-120000");
         std::fs::create_dir_all(finale.join("0")).unwrap();
         std::fs::create_dir_all(finale.join("1")).unwrap();
         std::fs::write(finale.join("0").join("overlay.png"), "installé").unwrap();
         std::fs::write(finale.join("1").join("alerte.mp3"), "installé").unwrap();
-        // Un asset d'une restauration précédente cohabite dans le dossier 1 :
-        // le fichier installé est retiré mais le dossier non vide reste.
-        std::fs::write(finale.join("1").join("autre.png"), "préexistant").unwrap();
+        // Une restauration précédente cohabite dans la racine : intacte.
+        std::fs::create_dir_all(racine.join("20251231-090000")).unwrap();
 
         retirer_assets(&[
             finale.join("0").join("overlay.png"),
             finale.join("1").join("alerte.mp3"),
         ]);
 
-        assert!(!finale.join("0").exists(), "dossier vidé donc supprimé");
-        assert!(!finale.join("1").join("alerte.mp3").exists());
-        assert!(finale.join("1").join("autre.png").is_file());
+        assert!(!finale.exists(), "dossier horodaté vidé donc supprimé");
+        assert!(racine.join("20251231-090000").is_dir());
     }
 
     #[test]
@@ -761,6 +996,16 @@ mod tests {
         assert!(chemin_relatif_sur(base, "Ma Collection.json").is_ok());
         // Des points au milieu d'un nom de fichier restent légitimes.
         assert!(chemin_relatif_sur(base, "photo..2026.png").is_ok());
+        // Proches des noms réservés, mais légitimes.
+        for rel in [
+            "console.json",
+            "COM10.png",
+            "nullable.ini",
+            "Auxiliaire.json",
+            ".sentinel",
+        ] {
+            assert!(chemin_relatif_sur(base, rel).is_ok(), "{rel}");
+        }
     }
 
     #[test]
@@ -779,6 +1024,15 @@ mod tests {
             "..",
             "",
             "a/fichier\u{0}.txt",
+            "plugin_config/obs-browser./Cookies",
+            ".sentinel./x",
+            "a/dossier /x",
+            "a/fichier.",
+            "CON",
+            "a/nul.txt",
+            "Com1.json",
+            "lpt9",
+            "aux .ini",
         ] {
             let e = chemin_relatif_sur(base, rel)
                 .expect_err(&format!("« {rel} » aurait dû être rejeté"));

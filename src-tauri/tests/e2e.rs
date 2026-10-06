@@ -10,6 +10,8 @@ const FAKE_STREAM_KEY: &str = "live_9999_ULTRASECRETSTREAMKEY";
 const FAKE_TOKEN: &str = "oauthTOKENsecret123";
 const FAKE_WS_PASSWORD: &str = "WSPASS_ULTRASECRET";
 const FAKE_DB_TOKEN: &str = "SQLITE_TOKEN_ULTRASECRET";
+const FAKE_SCRIPT_TOKEN: &str = "SCRIPT_TOKEN_ULTRASECRET";
+const FAKE_API_KEY: &str = "INI_APIKEY_ULTRASECRET";
 
 /// Les variables STREAMPOD_* sont globales au processus : les tests qui les
 /// posent s'exécutent l'un après l'autre.
@@ -23,7 +25,23 @@ fn verrou_env() -> std::sync::MutexGuard<'static, ()> {
 fn build_fake_config(root: &Path, asset: &Path) {
     let scenes = root.join("basic").join("scenes");
     fs::create_dir_all(&scenes).unwrap();
-    let asset_json = asset.to_string_lossy().replace('\\', "/");
+    let json = |p: &Path| p.to_string_lossy().replace('\\', "/");
+    let asset_json = json(asset);
+    // Script OBS (restauré mais désactivé), exécutable et secrets référencés
+    // par des sources (jamais archivés).
+    let script = asset.with_file_name("chat.lua");
+    fs::write(&script, "-- script de chat").unwrap();
+    let exe = asset.with_file_name("outil.exe");
+    fs::write(&exe, "MZ-FAUX-EXE").unwrap();
+    let env = asset.with_file_name(".env");
+    fs::write(&env, format!("BOT_TOKEN={FAKE_TOKEN}")).unwrap();
+    let bak = root
+        .join("basic")
+        .join("profiles")
+        .join("Principal")
+        .join("service.json.bak");
+    let (script_json, exe_json, env_json, bak_json) =
+        (json(&script), json(&exe), json(&env), json(&bak));
     fs::write(
         scenes.join("Ma Collection.json"),
         format!(
@@ -32,8 +50,15 @@ fn build_fake_config(root: &Path, asset: &Path) {
   "sources": [
     {{ "id": "image_source", "settings": {{ "file": "{asset_json}" }} }},
     {{ "id": "ffmpeg_source", "settings": {{ "local_file": "C:/introuvable/video.mp4" }} }},
+    {{ "id": "ffmpeg_source", "settings": {{ "local_file": "{exe_json}" }} }},
+    {{ "id": "text_gdiplus_v3", "settings": {{ "read_from_file": true, "file": "{bak_json}" }} }},
+    {{ "id": "text_gdiplus_v3", "settings": {{ "read_from_file": true, "file": "{env_json}" }} }},
     {{ "hotkeys": {{ "key": "OBS_KEY_F1" }} }}
-  ]
+  ],
+  "modules": {{ "scripts-tool": [ {{
+    "path": "{script_json}",
+    "settings": {{ "oauth_token": "{FAKE_SCRIPT_TOKEN}", "bascule": [ {{ "key": "OBS_KEY_F9" }} ] }}
+  }} ] }}
 }}"#
         ),
     )
@@ -61,6 +86,15 @@ fn build_fake_config(root: &Path, asset: &Path) {
     )
     .unwrap();
 
+    // Second profil diffusant vers un serveur personnalisé.
+    let perso = root.join("basic").join("profiles").join("Perso");
+    fs::create_dir_all(&perso).unwrap();
+    fs::write(
+        perso.join("service.json"),
+        r#"{ "type": "rtmp_custom", "settings": { "server": "rtmp://exemple.test/live" } }"#,
+    )
+    .unwrap();
+
     fs::write(root.join("global.ini"), "[General]\nFirstRun=false\n").unwrap();
 
     let ws = root.join("plugin_config").join("obs-websocket");
@@ -69,8 +103,17 @@ fn build_fake_config(root: &Path, asset: &Path) {
     fs::write(
         ws.join("config.json"),
         format!(
-            r#"{{"server_enabled":true,"server_password":"{FAKE_WS_PASSWORD}","auth":{{"server_password":"{FAKE_WS_PASSWORD}"}}}}"#
+            r#"{{"server_enabled":true,"first_load":false,"auth_required":true,"server_password":"{FAKE_WS_PASSWORD}","auth":{{"server_password":"{FAKE_WS_PASSWORD}"}}}}"#
         ),
+    )
+    .unwrap();
+
+    // INI de plugin tiers avec une clé d'API.
+    let plugin_ini = root.join("plugin_config").join("plugin-ini");
+    fs::create_dir_all(&plugin_ini).unwrap();
+    fs::write(
+        plugin_ini.join("reglages.ini"),
+        format!("[Compte]\nApiKey={FAKE_API_KEY}\nLangue=fr\n"),
     )
     .unwrap();
 
@@ -174,6 +217,23 @@ fn backup_puis_restore_round_trip() {
     let programdata_src = root.join("programdata-src");
     build_fake_plugins_dir(&programdata_src);
 
+    // --- Aperçu : exécutable et secrets référencés exclus, et listés ---
+    let apercu = backup::preview(&config_src, None, None, None).unwrap();
+    assert_eq!(apercu.asset_count, 2, "overlay.png et chat.lua");
+    assert_eq!(
+        apercu.excluded_assets.len(),
+        3,
+        "{:?}",
+        apercu.excluded_assets
+    );
+    for exclu in ["outil.exe", ".env", "service.json.bak"] {
+        assert!(
+            apercu.excluded_assets.iter().any(|e| e.ends_with(exclu)),
+            "{exclu} devait être exclu : {:?}",
+            apercu.excluded_assets
+        );
+    }
+
     // --- Sauvegarde ---
     let backup_file = root.join("ma-sauvegarde.obsbackup");
     let warnings = std::sync::Mutex::new(Vec::<String>::new());
@@ -208,12 +268,12 @@ fn backup_puis_restore_round_trip() {
         "l'exclusion des fichiers de plugin au format non pris en charge doit être signalée"
     );
     assert_eq!(summary.scene_collections, 1);
-    assert_eq!(summary.profiles, 1);
+    assert_eq!(summary.profiles, 2);
     assert_eq!(
         summary.plugins, 2,
         "seuls les plugins tiers, sans doublon, doivent être inclus"
     );
-    assert_eq!(summary.assets, 1);
+    assert_eq!(summary.assets, 2);
     assert!(
         !backup_file.with_extension("obsbackup.tmp").exists(),
         "le fichier temporaire doit avoir été basculé vers la destination finale"
@@ -269,6 +329,13 @@ fn backup_puis_restore_round_trip() {
         "sous plugin_config/, seuls les .json et .ini assainis sont archivés (liste blanche)"
     );
 
+    assert!(
+        !names.iter().any(|n| n.ends_with(".exe")
+            || n.ends_with(".env")
+            || n.starts_with("assets/") && n.ends_with(".bak")),
+        "ni exécutable ni fichier de secrets parmi les assets : {names:?}"
+    );
+
     for i in 0..zip.len() {
         let mut entry = zip.by_index(i).unwrap();
         let mut content = Vec::new();
@@ -294,6 +361,16 @@ fn backup_puis_restore_round_trip() {
             "le token du fichier de plugin opaque a fui dans {}",
             entry.name()
         );
+        assert!(
+            !text.contains(FAKE_SCRIPT_TOKEN),
+            "le token des réglages de script a fui dans {}",
+            entry.name()
+        );
+        assert!(
+            !text.contains(FAKE_API_KEY),
+            "la clé d'API du .ini de plugin a fui dans {}",
+            entry.name()
+        );
     }
 
     // Le config.json d'obs-websocket est assaini (mot de passe retiré) mais
@@ -303,7 +380,16 @@ fn backup_puis_restore_round_trip() {
         .unwrap();
     let mut ws_text = String::new();
     ws_entry.read_to_string(&mut ws_text).unwrap();
-    assert!(ws_text.contains("server_enabled"));
+    let ws: serde_json::Value = serde_json::from_str(&ws_text).unwrap();
+    assert_eq!(
+        ws["server_enabled"], false,
+        "obs-websocket désactivé à la sauvegarde"
+    );
+    assert_eq!(
+        ws["first_load"], true,
+        "mot de passe régénéré par obs-websocket"
+    );
+    assert_eq!(ws["auth_required"], true);
     assert!(!ws_text.contains("server_password"));
     drop(ws_entry);
 
@@ -315,6 +401,10 @@ fn backup_puis_restore_round_trip() {
     let mut scene_text = String::new();
     scene_entry.read_to_string(&mut scene_text).unwrap();
     assert!(scene_text.contains("OBS_KEY_F1"));
+    assert!(
+        scene_text.contains("OBS_KEY_F9"),
+        "raccourci des réglages de script conservé"
+    );
     drop(scene_entry);
 
     // --- Restauration sur la fausse machine "destination" ---
@@ -342,9 +432,24 @@ fn backup_puis_restore_round_trip() {
     std::env::set_var("STREAMPOD_INSTALL_DIR", &install_dst);
     std::env::set_var("STREAMPOD_OBS_VERSION", "31.1.0"); // même version majeure
 
+    let apercu = restore::preview(&backup_file).unwrap();
+    assert_eq!(apercu.services.len(), 2);
+    assert!(
+        apercu
+            .warnings
+            .iter()
+            .any(|w| w.contains("Perso") && w.contains("rtmp://exemple.test/live")),
+        "serveur personnalisé signalé : {:?}",
+        apercu.warnings
+    );
+    assert!(apercu
+        .warnings
+        .iter()
+        .any(|w| w.contains("personnes de confiance")));
+
     let result = restore::restore(&backup_file, &[], |_| {}, || false).unwrap();
     assert_eq!(result.scene_collections, 1);
-    assert_eq!(result.assets_restored, 1);
+    assert_eq!(result.assets_restored, 2);
     assert_eq!(result.plugins_status, "manual");
     assert!(result.previous_config_backup.is_none());
 
@@ -359,8 +464,21 @@ fn backup_puis_restore_round_trip() {
         .is_file());
 
     // L'asset est restauré et le JSON de scènes pointe vers lui.
-    let restored_asset = assets_dst.join("0").join("overlay.png");
+    let assets_restaures = Path::new(result.assets_dir.as_deref().unwrap());
+    assert!(
+        assets_restaures.starts_with(&assets_dst) && assets_restaures != assets_dst,
+        "assets dans un sous-dossier horodaté : {}",
+        assets_restaures.display()
+    );
+    let restored_asset = assets_restaures.join("1").join("overlay.png");
     assert!(restored_asset.is_file());
+    // Le script est restauré mais retiré de la collection : à réactiver.
+    let script_restaure = assets_restaures.join("0").join("chat.lua");
+    assert!(script_restaure.is_file());
+    assert_eq!(
+        result.scripts,
+        [script_restaure.to_string_lossy().replace('\\', "/")]
+    );
     let scene_text = fs::read_to_string(
         config_dst
             .join("basic")
@@ -372,6 +490,10 @@ fn backup_puis_restore_round_trip() {
     assert!(
         scene_text.contains(&expected),
         "le chemin d'asset n'a pas été réécrit : {scene_text}"
+    );
+    assert!(
+        !scene_text.contains("chat.lua"),
+        "le script ne doit pas être réactivé automatiquement : {scene_text}"
     );
 
     // Le plugin tiers n'est JAMAIS copié dans l'installation OBS de la
@@ -416,6 +538,7 @@ fn backup_puis_restore_round_trip() {
     )
     .unwrap();
     assert!(!ws_config_text.contains(FAKE_WS_PASSWORD));
+    assert!(ws_config_text.contains(r#""server_enabled": false"#));
 
     // --- Seconde restauration : l'ancienne config est mise de côté ---
     std::thread::sleep(std::time::Duration::from_millis(1100)); // horodatage différent

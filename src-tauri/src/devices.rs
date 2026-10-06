@@ -94,9 +94,9 @@ mod win {
     // GUID documentés (uuids.h) : énumérateur système et catégorie
     // « périphériques d'entrée vidéo » de DirectShow.
     const CLSID_SYSTEM_DEVICE_ENUM: windows::core::GUID =
-        windows::core::GUID::from_u128(0x62BE5D10_60EB_11d0_BD3B_00A0C911CE86);
+        windows::core::GUID::from_u128(0x62BE5D10_60EB_11D0_BD3B_00A0C911CE86);
     const CLSID_VIDEO_INPUT_DEVICE_CATEGORY: windows::core::GUID =
-        windows::core::GUID::from_u128(0x860BB310_5D01_11d0_BD3B_00A0C911CE86);
+        windows::core::GUID::from_u128(0x860BB310_5D01_11D0_BD3B_00A0C911CE86);
 
     fn err(context: &str, e: impl std::fmt::Display) -> String {
         format!("{context} : {e}")

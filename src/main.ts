@@ -28,6 +28,7 @@ interface BackupPreview {
   asset_count: number;
   asset_total_size: number;
   missing_assets: string[];
+  excluded_assets: string[];
   browser_sources: number;
 }
 
@@ -49,12 +50,20 @@ interface Manifest {
   assets: { file_name: string; size: number }[];
 }
 
+interface ServiceProfil {
+  profil: string;
+  type_service: string;
+  service: string | null;
+  serveur: string | null;
+}
+
 interface RestorePreview {
   manifest: Manifest;
   backup_file_size: number;
   obs_installed: boolean;
   installed_version: string | null;
   config_exists: boolean;
+  services: ServiceProfil[];
   warnings: string[];
 }
 
@@ -68,6 +77,7 @@ interface RestoreSummary {
   plugins: string[];
   previous_config_backup: string | null;
   sources_remappees: number;
+  scripts: string[];
 }
 
 type Famille = "entree_audio" | "sortie_audio" | "video";
@@ -393,6 +403,17 @@ async function startBackupFlow() {
         ),
       );
     }
+    if (preview.excluded_assets.length > 0) {
+      warnings.append(
+        noteItem(
+          `Par sécurité, ${preview.excluded_assets.length} fichier(s) référencé(s) par vos ` +
+            `scènes ne seront pas inclus (programmes, fichiers de configuration ou de ` +
+            `secrets) : ` +
+            listOrDash(preview.excluded_assets, 3),
+          "warning",
+        ),
+      );
+    }
     if (preview.missing_assets.length > 0) {
       warnings.append(
         noteItem(
@@ -506,6 +527,14 @@ async function startRestoreFlow() {
       summaryRow("Assets", `${m.assets.length} fichier(s)`),
       summaryRow("Taille du fichier", formatBytes(preview.backup_file_size)),
     );
+    for (const s of preview.services) {
+      summary.append(
+        summaryRow(
+          `Diffusion du profil ${s.profil}`,
+          [s.service, s.serveur].filter(Boolean).join(" · ") || s.type_service || "-",
+        ),
+      );
+    }
     const warnings = $("restore-warnings");
     warnings.replaceChildren(...preview.warnings.map((w) => noteItem(w, "warning")));
     restoreObsInstalled = preview.obs_installed;
@@ -684,6 +713,16 @@ async function runRestore() {
           `Par sécurité, les plugins ne sont jamais installés automatiquement. ` +
             `Réinstallez-les depuis obsproject.com/forum/list/plugins.35 : ` +
             result.plugins.join(", "),
+          "warning",
+        ),
+      );
+    }
+    if (result.scripts.length > 0) {
+      notes.append(
+        noteItem(
+          `Par sécurité, les scripts ne sont jamais réactivés automatiquement. ` +
+            `Scripts à réactiver dans Outils → Scripts : ` +
+            result.scripts.join(" · "),
           "warning",
         ),
       );

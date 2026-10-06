@@ -101,6 +101,22 @@ fn archive_piegee_refusee_sans_ecriture_hors_bac_a_sable() {
     write_archive(&piege3, &manifest3, &[(archive_path.as_str(), b"MECHANT")]);
     restauration_refusee(&piege3);
 
+    // Scénario 3 bis : point final ou nom réservé Windows. `obs-browser.`
+    // deviendrait `obs-browser` (exclu) une fois créé par Windows.
+    for (i, nom) in [
+        "config/plugin_config/obs-browser./Cookies",
+        "config/.sentinel./x",
+        "config/basic/NUL.json",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let piege = root.join(format!("piege-windows-{i}.obsbackup"));
+        write_archive(&piege, &manifest_minimal(), &[(nom, b"MECHANT")]);
+        restauration_refusee(&piege);
+    }
+    assert!(!config_dst.join("plugin_config").exists());
+
     // Aucun fichier n'a été écrit hors du bac à sable.
     assert!(
         !evil1.exists(),

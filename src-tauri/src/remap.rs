@@ -1,7 +1,7 @@
 //! Diagnostic en lecture seule du remappage matériel (étape 2 du plan).
 //!
-//! Lit les collections de scènes directement dans l'archive `.obsbackup`
-//! - sans extraction, sans dossier temporaire, sans copie d'asset - puis
+//! Lit les collections de scènes directement dans l'archive `.obsbackup`,
+//! sans extraction, sans dossier temporaire ni copie d'asset, puis
 //! compare les périphériques référencés avec l'inventaire de ce PC pour
 //! distinguer les références encore valides des associations à confirmer.
 //!

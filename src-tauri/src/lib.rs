@@ -15,7 +15,6 @@ use tauri::Emitter;
 /// global suffit ; remis à zéro au démarrage de chaque opération.
 static ANNULATION_DEMANDEE: AtomicBool = AtomicBool::new(false);
 
-const OBS_RUNNING_MSG: &str = "OBS est en cours d'exécution. Fermez OBS puis réessayez.";
 const NO_CONFIG_MSG: &str =
     "Aucune configuration OBS trouvée sur cet ordinateur (dossier obs-studio introuvable). \
      OBS a-t-il déjà été lancé ici ?";
@@ -61,10 +60,10 @@ async fn backup_create(
     ANNULATION_DEMANDEE.store(false, Ordering::Relaxed);
     tauri::async_runtime::spawn_blocking(move || {
         if obs::is_running() {
-            return Err(OBS_RUNNING_MSG.to_string());
+            return Err(obs::OBS_RUNNING_MSG.to_string());
         }
         let config = obs::config_dir().ok_or(NO_CONFIG_MSG)?;
-        backup::create(
+        backup::create_avec_garde(
             &config,
             obs::install_dir().as_deref(),
             obs::plugins_dir().as_deref(),
@@ -74,6 +73,7 @@ async fn backup_create(
                 let _ = app.emit("streampod://progress", &p);
             },
             || ANNULATION_DEMANDEE.load(Ordering::Relaxed),
+            obs::is_running,
         )
     })
     .await
@@ -111,15 +111,16 @@ async fn restore_run(
     ANNULATION_DEMANDEE.store(false, Ordering::Relaxed);
     tauri::async_runtime::spawn_blocking(move || {
         if obs::is_running() {
-            return Err(OBS_RUNNING_MSG.to_string());
+            return Err(obs::OBS_RUNNING_MSG.to_string());
         }
-        restore::restore(
+        restore::restore_avec_garde(
             Path::new(&backup_path),
             &choix,
             |p| {
                 let _ = app.emit("streampod://progress", &p);
             },
             || ANNULATION_DEMANDEE.load(Ordering::Relaxed),
+            obs::is_running,
         )
     })
     .await

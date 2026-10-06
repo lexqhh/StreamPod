@@ -3,6 +3,10 @@
 use serde::Serialize;
 use std::path::PathBuf;
 
+/// Refus d'une opération quand OBS tourne : il réécrirait sa configuration
+/// à sa fermeture.
+pub const OBS_RUNNING_MSG: &str = "OBS est en cours d'exécution. Fermez OBS puis réessayez.";
+
 /// Nom du processus principal d'OBS sur Windows 64 bits.
 const OBS_PROCESS_NAMES: &[&str] = &["obs64.exe", "obs32.exe", "obs.exe"];
 

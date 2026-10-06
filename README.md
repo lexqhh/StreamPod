@@ -40,7 +40,8 @@ Aucune connexion réseau, aucune télémétrie : **100 % local**.
   (`obs-studio.bak-<date>`) avant la bascule ; en cas d'échec, elle est remise
   en place automatiquement. Jamais d'OBS sans configuration.
 - **Assets embarqués et rechemins automatiques** - images, vidéos, sons et
-  overlays sont déposés dans `Documents\OBS-Backup-Assets`, et les chemins sont
+  overlays sont déposés dans `Documents\OBS-Backup-Assets\<date>`, un dossier
+  propre à chaque restauration (rien n'est jamais écrasé), et les chemins sont
   réécrits dans les scènes pour pointer au bon endroit sur le nouveau PC.
 - **Remappage du matériel** - quand un micro, une webcam ou une sortie audio
   n'existe pas sur la machine cible, StreamPod propose des remplaçants classés par
@@ -68,7 +69,19 @@ Ne sont **jamais** enregistrés dans l'archive :
 Les fichiers de configuration des plugins sont assainis par liste blanche : seuls
 les `.json` et `.ini` nettoyés sont archivés (par exemple le mot de passe
 d'obs-websocket est retiré), tout autre format opaque est exclu avec un
-avertissement.
+avertissement. Les réglages des scripts OBS sont nettoyés de la même façon, et
+les fichiers référencés par vos scènes qui ressemblent à des secrets ou à des
+programmes (`.bak`, `.env`, `.json`, `.ini`, `.exe`, `.dll`…) ne sont jamais
+embarqués : l'aperçu les liste.
+
+À la restauration, une archive est traitée comme une donnée non fiable :
+
+- les **scripts** (Lua, Python) sont restaurés mais **désactivés** - la liste
+  des scripts à réactiver dans **Outils → Scripts** s'affiche à la fin ;
+- le serveur **obs-websocket** est désactivé (il régénère son mot de passe au
+  prochain lancement) ;
+- l'aperçu affiche le **serveur de diffusion** de chaque profil et signale un
+  serveur personnalisé.
 
 > [!TIP]
 > Après une restauration, il suffit de re-saisir votre clé de stream ou de
