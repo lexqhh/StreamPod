@@ -14,7 +14,7 @@ Charte de l'identité visuelle StreamPod. Document **autoportant** : tout ce qui
 
 StreamPod est un outil : léger, local, sans superflu. L'identité traduit cette promesse par une esthétique **de terminal** — fond quasi noir, texte monospace, arborescences de fichiers, points de statut, une seule couleur d'accent qui ne sert qu'à confirmer.
 
-**Ton rédactionnel** : français, phrases courtes, factuel. On annonce ce que le produit fait et ce qu'il ne fait pas. Les promesses sont chiffrées (`100 % local`, `0 requête réseau`, `~10 Mo`) plutôt que qualifiées.
+**Ton rédactionnel** : français, phrases courtes, factuel. On annonce ce que le produit fait et ce qu'il ne fait pas. Les promesses sont chiffrées (`100 % local`, `0 télémétrie`, `~10 Mo`) plutôt que qualifiées.
 
 **Ce que l'identité n'est pas** :
 - pas de néon gaming (violet/cyan saturés, glow épais, italiques agressives) ;
@@ -391,7 +391,7 @@ Le nom « StreamPod » ne descend pas sous **16 px de hauteur de casse** en rend
 ### Textes à réutiliser
 
 Tagline : `WINDOWS 10/11 · GRATUIT · ~10 MO PORTABLE`
-Promesses : `100 % local` · `0 requête réseau` · `secrets jamais sauvegardés` · `Gratuit · Portable`
+Promesses : `100 % local` · `0 télémétrie` · `secrets jamais sauvegardés` · `Gratuit · Portable`
 
 ---
 
@@ -444,6 +444,10 @@ Le vert est le **succès**. L'avertissement et l'erreur emploient les deux teint
 
 Le panneau reste `#0d0d0d` dans les deux cas : la teinte est un liseré et une marque, jamais un fond. Sur le web, ces deux états conservent le traitement monochrome (préfixe `#9a9a9a` / `#ededed`, liseré blanc).
 
+### Bandeau de mise à jour
+
+Panneau `#0d0d0d` sous l'en-tête, liseré gauche 2 px `#74d8a0` (même traitement qu'une note) : titre `Version X disponible` en `#ededed`, notes de version en Mono 12 px `#9a9a9a` (défilement au-delà de 120 px), boutons compacts `Plus tard` (secondaire) et `Mettre à jour` (primaire). Jamais de fond vert ni d'animation d'appel. La recherche de mises à jour, seule requête réseau, reste toujours mentionnée sur l'accueil (`Recherche de mises à jour au démarrage activée · Désactiver · Rechercher maintenant`, Mono 12 px `#6f6f6f`) ; `✓ StreamPod est à jour` passe en `#74d8a0`.
+
 ### Progression & journaux
 
 - **Barre de progression** : rail `#1a1a1a`, hauteur 2 à 4 px, rayon 0 ou 2 px, remplissage `#74d8a0`. Pas de rayures, pas d'animation de brillance. Le pourcentage à côté en Mono 12 px `#9a9a9a`.
@@ -452,7 +456,7 @@ Le panneau reste `#0d0d0d` dans les deux cas : la teinte est un liseré et une m
 
 ### Barre de statut basse
 
-Filet haut `rgba(255,255,255,0.08)`, hauteur ≈ 40 px, Mono 11,5 px capitales `0.08em` en `#7a7a7a`, items précédés d'un point de 6 px `#74d8a0` pulsé avec des délais désynchronisés. Y afficher les invariants du produit : `100 % local`, `0 requête réseau`.
+Filet haut `rgba(255,255,255,0.08)`, hauteur ≈ 40 px, Mono 11,5 px capitales `0.08em` en `#7a7a7a`, items précédés d'un point de 6 px `#74d8a0` pulsé avec des délais désynchronisés. Y afficher les invariants du produit : `100 % local`, `0 télémétrie`.
 
 ### Icône & écran de démarrage
 
@@ -473,14 +477,14 @@ Mêmes constantes : courbe `cubic-bezier(0.22, 1, 0.36, 1)`, 180 ms pour les ét
 |---|---|
 | Titre | `Votre OBS complet, dans un seul fichier.` |
 | Kicker | `Sauvegarde & restauration - OBS Studio` |
-| Chapeau | `Scènes, profils, paramètres, plugins et assets - réunis dans une archive .obsbackup transportable, restaurée à l'identique sur n'importe quel PC. Aucune connexion réseau, jamais.` |
+| Chapeau | `Scènes, profils, paramètres, plugins et assets - réunis dans une archive .obsbackup transportable, restaurée à l'identique sur n'importe quel PC. Aucune télémétrie, aucune donnée envoyée.` |
 | Tagline | `WINDOWS 10/11 · GRATUIT · ~10 MO PORTABLE` |
-| Promesses | `100 % local` · `0 requête réseau` · `secrets jamais sauvegardés` |
+| Promesses | `100 % local` · `0 télémétrie` · `secrets jamais sauvegardés` |
 | Mention courte | `Gratuit · Portable` |
 | Inclus | `✓ Tout ce qu'il faut pour retrouver votre OBS` |
 | Exclu | `✕ Jamais votre clé de stream ni vos mots de passe` |
 | Appel final | `Prêt à changer de PC ?` |
-| Action | `Télécharger StreamPod.exe` |
+| Action | `Télécharger StreamPod` (installateur ; lien secondaire `Version portable`) |
 | Copyright | `© 2026 StreamPod` |
 
 ### Conventions d'écriture
@@ -565,6 +569,6 @@ Bloc à copier tel quel dans un projet web (identique à l'implémentation de r�
 - **Aucune version monochrome / une couleur** du logo — impression, gravure, tampon, filigrane sont hors périmètre pour l'instant.
 - **Pas de favicon SVG** ni de logo vectoriel : les assets sont en PNG, `streampod-logo.png` plafonne à 431 × 512. Toute utilisation grand format (affiche, écran très dense) demande un ré-export vectoriel.
 - **Aucun asset social existant** : les formats du § 10 sont des recettes, pas des fichiers livrés.
-- **Dépendance Google Fonts** pour le web. L'application Windows, elle, embarque les fichiers de police via `@fontsource` (SIL OFL, redistribuables) : sa CSP n'autorise que `font-src 'self'` et le produit ne fait aucune requête réseau.
+- **Dépendance Google Fonts** pour le web. L'application Windows, elle, embarque les fichiers de police via `@fontsource` (SIL OFL, redistribuables) : sa CSP n'autorise que `font-src 'self'` et le produit ne fait aucune autre requête réseau que la recherche de mises à jour (désactivable).
 - **Les couleurs d'état sont réservées à l'app.** L'ambre et le rouge du § 4 n'ont pas d'équivalent web ni social : un avertissement dans un visuel de marque reste monochrome.
 - **Aucune marque `✓` / `✕` dans les polices embarquées** : ces glyphes retombent sur la police système. Acceptable en app ; sur un visuel de marque, les composer en vectoriel.

@@ -129,6 +129,16 @@ interface CopieSecurite {
   taille: number;
 }
 
+interface InfosMaj {
+  version: string;
+  notes: string | null;
+  mode: "installe" | "portable";
+}
+
+interface ReglageMaj {
+  verifier_au_demarrage: boolean;
+}
+
 interface Progress {
   step: string;
   message: string;
@@ -164,6 +174,8 @@ function show(screen: Screen) {
   // Le motif dépend de l'écran, et les écrans de résumé reconstruisent leurs
   // avertissements juste avant d'appeler show() : on le repose ici.
   appliquerVerrouObs();
+  // Jamais de mise à jour pendant une opération (refusée aussi côté Rust).
+  $<HTMLButtonElement>("btn-maj-installer").disabled = screen === "progress";
   window.scrollTo({ top: 0, left: 0 });
   // Accessibilité : replacer le focus sur le titre du nouvel écran, sinon
   // il reste sur un élément passé en display:none (clavier/lecteur d'écran perdus).
@@ -397,6 +409,7 @@ const STEP_LABELS: Record<string, string> = {
   remap: "Périphériques",
   swap: "Mise en place",
   warning: "Avertissement",
+  maj: "Mise à jour",
 };
 
 listen<Progress>("streampod://progress", (event) => {
@@ -991,6 +1004,90 @@ function ecouterGlisserDeposer() {
   });
 }
 
+/* ---------- Mise à jour ---------- */
+
+let reglageMaj: ReglageMaj = { verifier_au_demarrage: true };
+
+function afficherEtatMaj(texte?: string, succes = false) {
+  const actif = reglageMaj.verifier_au_demarrage;
+  $("maj-etat-texte").classList.toggle("succes", succes);
+  $("maj-etat-texte").textContent =
+    texte ??
+    `Recherche de mises à jour au démarrage ${actif ? "activée" : "désactivée"}`;
+  $("btn-maj-basculer").textContent = actif ? "Désactiver" : "Activer";
+}
+
+function afficherBanniereMaj(infos: InfosMaj) {
+  $("maj-titre").textContent = `Version ${infos.version} disponible`;
+  $("maj-notes").textContent = (infos.notes ?? "").replace(/\*\*/g, "").trim();
+  $("btn-maj-installer").classList.remove("hidden");
+  $("btn-maj-release").classList.add("hidden");
+  $("banniere-maj").classList.remove("hidden");
+}
+
+/** Au démarrage (`manuel` faux), un échec réseau reste silencieux. */
+async function rechercherMaj(manuel: boolean) {
+  const btn = $<HTMLButtonElement>("btn-maj-rechercher");
+  btn.disabled = true;
+  if (manuel) afficherEtatMaj("Recherche en cours…");
+  try {
+    const infos = await invoke<InfosMaj | null>("verifier_mise_a_jour", { manuel });
+    if (infos) {
+      afficherBanniereMaj(infos);
+      afficherEtatMaj();
+    } else {
+      afficherEtatMaj(manuel ? "✓ StreamPod est à jour" : undefined, manuel);
+    }
+  } catch (e) {
+    afficherEtatMaj();
+    showError(String(e));
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function basculerReglageMaj() {
+  const reglage = { verifier_au_demarrage: !reglageMaj.verifier_au_demarrage };
+  try {
+    await invoke("ecrire_reglage_maj", { reglage });
+    reglageMaj = reglage;
+    afficherEtatMaj();
+  } catch (e) {
+    showError(String(e));
+  }
+}
+
+async function installerMaj() {
+  if (operationEnCours()) return;
+  hideError();
+  resetProgress("Mise à jour en cours…");
+  $("btn-cancel-operation").classList.add("hidden");
+  $("banniere-maj").classList.add("hidden");
+  show("progress");
+  try {
+    // En cas de succès, StreamPod se ferme et la nouvelle version démarre.
+    await invoke("appliquer_mise_a_jour");
+  } catch (e) {
+    show("home");
+    showError(String(e));
+    // Quel que soit l'échec (lecture seule, clé exFAT, antivirus…), le
+    // téléchargement manuel reste possible : jamais d'utilisateur bloqué.
+    $("btn-maj-installer").classList.add("hidden");
+    $("btn-maj-release").classList.remove("hidden");
+    $("banniere-maj").classList.remove("hidden");
+  }
+}
+
+async function initialiserMaj() {
+  try {
+    reglageMaj = await invoke<ReglageMaj>("lire_reglage_maj");
+  } catch {
+    // Réglage illisible : valeur par défaut (activé).
+  }
+  afficherEtatMaj();
+  if (reglageMaj.verifier_au_demarrage) void rechercherMaj(false);
+}
+
 /* ---------- Câblage ---------- */
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -1005,6 +1102,15 @@ window.addEventListener("DOMContentLoaded", () => {
   $("error-close").addEventListener("click", hideError);
   $("btn-open-backups").addEventListener("click", () => void afficherCopies());
   $("btn-cancel-operation").addEventListener("click", demanderAnnulation);
+  $("btn-maj-installer").addEventListener("click", () => void installerMaj());
+  $("btn-maj-plus-tard").addEventListener("click", () =>
+    $("banniere-maj").classList.add("hidden"),
+  );
+  $("btn-maj-release").addEventListener("click", () => {
+    invoke("ouvrir_page_release").catch((e) => showError(String(e)));
+  });
+  $("btn-maj-basculer").addEventListener("click", () => void basculerReglageMaj());
+  $("btn-maj-rechercher").addEventListener("click", () => void rechercherMaj(true));
   $("btn-reveal").addEventListener("click", () => {
     if (!revealTarget) return;
     const { path, kind } = revealTarget;
@@ -1023,6 +1129,7 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   void refreshObsStatus();
+  void initialiserMaj();
   ecouterGlisserDeposer();
   // Double-clic sur un .obsbackup : au lancement, ou renvoyé par une 2e
   // instance vers cette fenêtre (plugin single-instance).

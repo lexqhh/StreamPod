@@ -19,7 +19,9 @@ embarquer votre clé de stream.
 Changer d'ordinateur, streamer en déplacement, réinstaller Windows : StreamPod
 réunit vos **scènes, profils, paramètres, assets et la liste de vos plugins** dans une seule
 archive transportable sur clé USB, et remet tout en place de l'autre côté.
-Aucune connexion réseau, aucune télémétrie : **100 % local**.
+Vos données restent **100 % locales** : une seule requête, vers GitHub, pour
+vérifier les mises à jour - désactivable. Aucune télémétrie, aucune donnée
+envoyée.
 
 ## Sommaire
 
@@ -27,8 +29,9 @@ Aucune connexion réseau, aucune télémétrie : **100 % local**.
 - [Confidentialité](#confidentialité)
 - [Utilisation](#utilisation)
 - [Installation](#installation)
+- [Mises à jour](#mises-à-jour)
 - [Le format `.obsbackup`](#le-format-obsbackup)
-- [Développement](#développement)
+- [Compiler depuis les sources](#compiler-depuis-les-sources)
 - [Architecture](#architecture)
 - [Notes de version](#notes-de-version)
 
@@ -150,16 +153,51 @@ StreamPod est une application **Windows** (10/11). OBS Studio doit avoir été l
 moins une fois sur la machine pour que son dossier de configuration existe.
 Testé avec OBS Studio 32.2.2.
 
-Le plus simple est de récupérer l'exécutable portable produit par la
-compilation (voir [Développement](#développement)) : `StreamPod.exe` se lance sans
-installation, y compris depuis une clé USB.
+**[Télécharger l'installateur](https://github.com/lexqhh/StreamPod/releases/latest/download/StreamPod-setup.exe)**
+(`StreamPod-setup.exe`) : StreamPod s'installe pour votre session Windows, sans
+droits administrateur, et s'associe aux fichiers `.obsbackup`.
+
+**Version portable** - pour une clé USB ou sans installation :
+[`StreamPod.exe`](https://github.com/lexqhh/StreamPod/releases/latest/download/StreamPod.exe)
+se lance directement, sans rien installer.
+
+Les empreintes SHA-256 de chaque fichier sont publiées avec
+[la release](https://github.com/lexqhh/StreamPod/releases/latest)
+(`SHA256SUMS.txt`).
 
 > [!NOTE]
 > L'exécutable n'étant pas encore signé, Windows SmartScreen peut afficher un
 > avertissement au premier lancement. Choisissez **Informations complémentaires
-> → Exécuter quand même**. StreamPod ne fait aucune requête réseau et ne se met pas à
-> jour tout seul : revenez sur la page de téléchargement pour obtenir une
-> nouvelle version.
+> → Exécuter quand même**.
+
+## Mises à jour
+
+Au démarrage, StreamPod vérifie s'il existe une nouvelle version : c'est sa
+**seule requête réseau**, vers GitHub, sans aucune donnée envoyée. Elle se
+désactive en un clic depuis l'accueil (« Recherche de mises à jour au démarrage
+· Désactiver »), et « Rechercher maintenant » lance une vérification à la
+demande. Hors ligne, rien ne s'affiche.
+
+Quand une version est disponible, un bandeau présente ses notes. Au clic sur
+**Mettre à jour**, le fichier est téléchargé et sa **signature vérifiée** avant
+toute installation :
+
+- **version installée** : l'installateur s'exécute sans question, puis
+  StreamPod redémarre ;
+- **version portable** : `StreamPod.exe` est remplacé sur place (son nom est
+  conservé) et relancé. L'ancienne version est gardée jusqu'à ce que la
+  nouvelle démarre ; en cas d'échec, elle est remise en place.
+
+Si la mise à jour échoue (dossier non modifiable, clé USB protégée, antivirus),
+StreamPod l'explique et propose d'ouvrir la page de téléchargement pour
+récupérer la nouvelle version à la main.
+
+La mise à jour est refusée pendant une sauvegarde ou une restauration.
+
+> [!NOTE]
+> Les versions 0.2.0 et antérieures n'intègrent pas cette fonction : téléchargez
+> la 0.3.0 une dernière fois à la main. Le réglage est mémorisé par PC : une
+> version portable sur clé USB le retrouve activé sur chaque nouvelle machine.
 
 ## Le format `.obsbackup`
 
@@ -177,16 +215,20 @@ façon jamais réinstallées depuis l'archive, seule la liste du manifeste sert
 (réinstallation manuelle). Les archives plus anciennes qui contiennent un
 dossier `plugins/` restent restaurables : ces entrées sont simplement ignorées.
 
-## Développement
+## Compiler depuis les sources
 
 Prérequis : [Node.js](https://nodejs.org/), la [toolchain Rust](https://rustup.rs/)
 et les [prérequis Tauri pour Windows](https://tauri.app/start/prerequisites/).
 
 ```bash
 npm install
-npm run tauri dev      # lance l'app en mode développement
-npm run tauri build    # produit l'exécutable + installateur (src-tauri/target/release)
+npm run tauri dev                    # lance l'app en mode développement
+npm run tauri build -- --no-bundle   # exécutable seul (src-tauri/target/release)
 ```
+
+`npm run tauri build` sans `--no-bundle` produit aussi l'installateur et sa
+signature de mise à jour : il exige la clé privée de signature
+(`TAURI_SIGNING_PRIVATE_KEY`), réservée aux releases officielles.
 
 ### Tests
 
@@ -204,7 +246,8 @@ dans un bac à sable et **vérifie qu'aucun secret ne fuit** dans l'archive
 > Les tests ne touchent **jamais** votre vraie configuration OBS. Les variables
 > d'environnement `STREAMPOD_CONFIG_DIR`, `STREAMPOD_INSTALL_DIR`, `STREAMPOD_ASSETS_DIR`,
 > `STREAMPOD_PLUGINS_DIR`, `STREAMPOD_OBS_VERSION` et `STREAMPOD_POLICES` redirigent
-> tous les chemins et détections vers des valeurs de test.
+> tous les chemins et détections vers des valeurs de test ;
+> `STREAMPOD_UPDATER_DESACTIVE=1` coupe la recherche de mises à jour.
 
 ## Architecture
 
@@ -222,10 +265,23 @@ TypeScript** vanilla, en français.
 | `src-tauri/src/remap.rs` | Diagnostic et application du remappage matériel |
 | `src-tauri/src/polices.rs` | Polices installées (DirectWrite) |
 | `src-tauri/src/copies.rs` | Copies de sécurité : liste, retour, corbeille |
+| `src-tauri/src/maj.rs` | Mise à jour : mode installé/portable, réglage, signature, remplacement de l'exe |
 | `src-tauri/src/lib.rs` | Commandes exposées au frontend |
 | `src/main.ts` | Toute la logique de l'interface |
 
 ## Notes de version
+
+### 0.3.0
+
+- **Mise à jour intégrée** : recherche au démarrage (désactivable), bandeau avec
+  les notes de version, téléchargement signé puis installation en un clic -
+  installateur relancé en mode passif, ou remplacement de l'exécutable
+  portable avec retour arrière en cas d'échec.
+- **Distribution** : installateur `StreamPod-setup.exe` en téléchargement
+  principal, exécutable portable en alternative ; l'installateur MSI n'est
+  plus publié.
+- **Démarrage** : la fenêtre s'ouvre sur un fond sombre au lieu d'un écran
+  blanc pendant le chargement.
 
 ### 0.2.0
 

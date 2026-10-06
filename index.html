@@ -30,6 +30,21 @@
         <button id="error-close" class="link-btn">Fermer</button>
       </div>
 
+      <!-- Mise à jour disponible ; piloté par afficherBanniereMaj(). -->
+      <div id="banniere-maj" class="maj-banner hidden" role="status">
+        <div class="maj-contenu">
+          <p id="maj-titre" class="maj-titre"></p>
+          <p id="maj-notes" class="maj-notes"></p>
+        </div>
+        <div class="maj-actions">
+          <button id="btn-maj-plus-tard" class="btn secondary" type="button">Plus tard</button>
+          <button id="btn-maj-release" class="btn secondary hidden" type="button">
+            Ouvrir la page de téléchargement
+          </button>
+          <button id="btn-maj-installer" class="btn primary" type="button">Mettre à jour</button>
+        </div>
+      </div>
+
       <!-- Accueil -->
       <section id="screen-home" class="screen">
         <div class="cards">
@@ -96,6 +111,14 @@
             Copies de sécurité
           </button>
         </div>
+        <!-- Seule requête réseau de l'app : toujours visible, désactivable. -->
+        <p class="maj-etat">
+          <span id="maj-etat-texte">Recherche de mises à jour au démarrage activée</span>
+          <span aria-hidden="true">·</span>
+          <button id="btn-maj-basculer" class="link-btn" type="button">Désactiver</button>
+          <span aria-hidden="true">·</span>
+          <button id="btn-maj-rechercher" class="link-btn" type="button">Rechercher maintenant</button>
+        </p>
         <p class="privacy-note">
           <span class="included">✓ 100&nbsp;% local · tout ce qu'il faut pour retrouver votre OBS</span>
           <span class="excluded">✕ Jamais votre clé de stream ni vos mots de passe</span>

@@ -224,6 +224,73 @@ h2:focus-visible {
   color: var(--fg);
 }
 
+/* ---------- Mise à jour disponible ---------- */
+
+/* Même panneau que les notes : liseré vert, jamais de fond teinté. */
+.maj-banner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  margin-bottom: 24px;
+}
+
+.maj-contenu {
+  min-width: 0;
+  flex: 1 1 260px;
+}
+
+.maj-titre {
+  margin: 0;
+  color: var(--fg);
+}
+
+.maj-notes {
+  margin: 6px 0 0;
+  max-height: 120px;
+  overflow-y: auto;
+  white-space: pre-line;
+  font-size: 12px;
+  color: var(--muted);
+  user-select: text;
+}
+
+.maj-notes:empty {
+  display: none;
+}
+
+.maj-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.maj-actions .btn {
+  padding: 8px 14px;
+  font-size: 12px;
+}
+
+.maj-etat {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: baseline;
+  gap: 8px;
+  margin: 14px 0 0;
+  font-size: 12px;
+  color: var(--muted-4);
+}
+
+.maj-etat .succes {
+  color: var(--accent);
+}
+
 /* ---------- Accueil ---------- */
 
 .cards {

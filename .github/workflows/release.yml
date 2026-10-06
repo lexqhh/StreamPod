@@ -39,16 +39,41 @@ jobs:
         run: cargo test
 
       - name: Compilation
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           npm ci
           npm run tauri build
 
-      - name: Binaires et empreintes SHA-256
+      - name: Binaires, signatures, latest.json et empreintes SHA-256
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
+          v="${GITHUB_REF_NAME#v}"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
           mkdir dist-release
           cp src-tauri/target/release/streampod.exe dist-release/StreamPod.exe
-          cp src-tauri/target/release/bundle/msi/*.msi dist-release/
-          cp src-tauri/target/release/bundle/nsis/*.exe dist-release/
+          cp src-tauri/target/release/bundle/nsis/*-setup.exe dist-release/StreamPod-setup.exe
+          cp src-tauri/target/release/bundle/nsis/*-setup.exe.sig dist-release/StreamPod-setup.exe.sig
+          npx tauri signer sign dist-release/StreamPod.exe
+          # Notes du bandeau de mise à jour : section « ### X.Y.Z » du README (sans suffixe -rc).
+          awk -v v="### ${v%%-*}" '$0==v{f=1;next} /^##/{f=0} f' README.md > notes-maj.md
+          node -e '
+            const fs = require("fs");
+            const [v, base] = process.argv.slice(1);
+            const sig = (f) => fs.readFileSync("dist-release/" + f + ".sig", "utf8").trim();
+            fs.writeFileSync("dist-release/latest.json", JSON.stringify({
+              version: v,
+              notes: fs.readFileSync("notes-maj.md", "utf8").trim(),
+              pub_date: new Date().toISOString(),
+              platforms: {
+                "windows-x86_64": { url: base + "/StreamPod-setup.exe", signature: sig("StreamPod-setup.exe") },
+                "windows-x86_64-portable": { url: base + "/StreamPod.exe", signature: sig("StreamPod.exe") },
+              },
+            }, null, 2));
+          ' "$v" "$base"
           cd dist-release
           sha256sum * > SHA256SUMS.txt
           {
