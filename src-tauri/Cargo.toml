@@ -28,6 +28,9 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 walkdir = "2"
 dirs = "6"
 chrono = { version = "0.4", features = ["clock"] }
+tauri-plugin-updater = "2"
+minisign-verify = "0.2"
+base64 = "0.22"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
