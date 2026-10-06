@@ -52,8 +52,9 @@
             </svg>
             <h2>Sauvegarder mon OBS</h2>
             <p>
-              Scènes, profils, paramètres, plugins et assets réunis dans un
-              fichier <code>.obsbackup</code>, prêt pour une clé USB.
+              Scènes, profils, paramètres, liste de vos plugins et assets
+              réunis dans un fichier <code>.obsbackup</code>, prêt pour une clé
+              USB.
             </p>
           </button>
           <button id="card-restore" class="card">
@@ -89,6 +90,11 @@
               configuration.</span
             >
           </div>
+        </div>
+        <div class="home-links">
+          <button id="btn-open-backups" class="link-btn" type="button">
+            Copies de sécurité
+          </button>
         </div>
         <p class="privacy-note">
           <span class="included">✓ 100&nbsp;% local · tout ce qu'il faut pour retrouver votre OBS</span>
@@ -174,6 +180,25 @@
           <button class="btn primary" data-goto="home">Retour à l'accueil</button>
         </div>
       </section>
+      <!-- Copies de sécurité (obs-studio.bak-*) -->
+      <section id="screen-backups" class="screen hidden">
+        <h2>Copies de sécurité</h2>
+        <p class="remap-intro">
+          À chaque restauration, votre configuration précédente est conservée.
+          Revenez à l'une d'elles, ou placez celles devenues inutiles dans la
+          corbeille.
+        </p>
+        <div id="backups-list" class="remap-list"></div>
+        <div id="backups-warnings" class="warnings"></div>
+        <div class="actions">
+          <button class="btn secondary" data-goto="home">Retour</button>
+        </div>
+      </section>
     </main>
+
+    <!-- Voile de glisser-déposer ; piloté par ecouterGlisserDeposer(). -->
+    <div id="drop-overlay" class="drop-overlay hidden" aria-hidden="true">
+      <p>Déposez votre fichier <code>.obsbackup</code> pour le restaurer</p>
+    </div>
   </body>
 </html>

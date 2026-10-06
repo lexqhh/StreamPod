@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { openPath, revealItemInDir } from "@tauri-apps/plugin-opener";
 
 /* ---------- Types (miroir des structs Rust) ---------- */
@@ -121,6 +122,13 @@ interface RemapChoice {
   nouveau_id: string;
 }
 
+interface CopieSecurite {
+  chemin: string;
+  nom: string;
+  date: string | null;
+  taille: number;
+}
+
 interface Progress {
   step: string;
   message: string;
@@ -140,6 +148,7 @@ const SCREENS = [
   "remap",
   "progress",
   "done",
+  "backups",
 ] as const;
 type Screen = (typeof SCREENS)[number];
 
@@ -214,6 +223,43 @@ function noteItem(text: string, kind: "warning" | "note"): HTMLElement {
   return el;
 }
 
+/** Ligne de résumé dépliable : libellé et aperçu restent visibles, la liste
+ *  complète (avec les tailles le cas échéant) s'ouvre au clic. */
+function detailsRow(label: string, items: { nom: string; detail?: string }[]): HTMLElement {
+  if (items.length === 0) return summaryRow(label, "-");
+  const details = document.createElement("details");
+  details.className = "summary-details";
+  const resume = document.createElement("summary");
+  resume.className = "summary-row";
+  const l = document.createElement("span");
+  l.className = "label";
+  l.textContent = label;
+  const v = document.createElement("span");
+  v.className = "value";
+  v.textContent = listOrDash(items.map((i) => i.nom));
+  resume.append(l, v);
+  const liste = document.createElement("ul");
+  liste.className = "details-list";
+  for (const item of items) {
+    const li = document.createElement("li");
+    const nom = document.createElement("span");
+    nom.className = "details-name";
+    nom.textContent = item.nom;
+    li.append(nom);
+    if (item.detail) {
+      const detail = document.createElement("span");
+      detail.className = "details-meta";
+      detail.textContent = item.detail;
+      li.append(detail);
+    }
+    liste.append(li);
+  }
+  details.append(resume, liste);
+  return details;
+}
+
+const noms = (items: string[]) => items.map((nom) => ({ nom }));
+
 function listOrDash(items: string[], max = 4): string {
   if (items.length === 0) return "-";
   const shown = items.slice(0, max).join(", ");
@@ -265,6 +311,9 @@ function appliquerVerrouObs() {
   $<HTMLButtonElement>("btn-start-restore").disabled =
     obsRunning || !restoreObsInstalled;
   $<HTMLButtonElement>("btn-continue-restore").disabled = obsRunning;
+  document
+    .querySelectorAll<HTMLButtonElement>(".btn-revenir")
+    .forEach((b) => (b.disabled = obsRunning));
   // Le bouton Annuler de l'écran de progression n'est jamais verrouillé ici :
   // il reste utilisable même si OBS est lancé pendant une opération.
   // Le motif suit l'utilisateur : encart de l'accueil, ou note en tête des
@@ -275,6 +324,7 @@ function appliquerVerrouObs() {
   // L'écran de remappage n'est atteignable qu'OBS fermé, mais OBS peut être
   // lancé pendant que l'utilisateur y confirme ses périphériques.
   majMotifVerrou("remap-warnings", obsRunning && ecranCourant === "remap");
+  majMotifVerrou("backups-warnings", obsRunning && ecranCourant === "backups");
 }
 
 async function refreshObsStatus(): Promise<ObsInfo | null> {
@@ -384,14 +434,21 @@ async function startBackupFlow() {
     summary.replaceChildren(
       summaryRow("Configuration OBS", preview.config_dir),
       summaryRow("Version d'OBS", preview.obs_version ?? "inconnue"),
-      summaryRow(
+      ...(preview.fonts.length > 0
+        ? [detailsRow(`Polices utilisées (${preview.fonts.length})`, noms(preview.fonts))]
+        : []),
+      detailsRow(
         `Collections de scènes (${preview.scene_collections.length})`,
-        listOrDash(preview.scene_collections),
+        noms(preview.scene_collections),
       ),
-      summaryRow(`Profils (${preview.profiles.length})`, listOrDash(preview.profiles)),
-      summaryRow(
+      detailsRow(`Profils (${preview.profiles.length})`, noms(preview.profiles)),
+      detailsRow(
         `Plugins tiers (${preview.plugins.length})`,
-        listOrDash(preview.plugins.map((p) => p.name)),
+        preview.plugins.map((p) => ({ nom: p.name, detail: formatBytes(p.size) })),
+      ),
+      detailsRow(
+        `Fichiers d'assets (${preview.assets.length})`,
+        preview.assets.map((a) => ({ nom: a.chemin, detail: formatBytes(a.taille) })),
       ),
       summaryRow(
         "Assets (images, vidéos, sons…)",
@@ -513,6 +570,14 @@ async function startRestoreFlow() {
     filters: [{ name: "Sauvegarde OBS", extensions: ["obsbackup"] }],
   });
   if (!path || typeof path !== "string") return;
+  await ouvrirSauvegarde(path);
+}
+
+/** Aperçu de restauration d'une sauvegarde : choisie dans la boîte de
+ *  dialogue, ouverte par double-clic ou déposée sur la fenêtre. */
+async function ouvrirSauvegarde(path: string) {
+  hideError();
+  if (await obsBloqueLOperation()) return;
   selectedBackupPath = path;
 
   try {
@@ -526,16 +591,19 @@ async function startRestoreFlow() {
       summaryRow("Sauvegarde", path),
       summaryRow("Créée le", created),
       summaryRow("Version d'OBS d'origine", m.obs_version ?? "inconnue"),
-      summaryRow(
+      detailsRow(
         `Collections de scènes (${m.scene_collections.length})`,
-        listOrDash(m.scene_collections),
+        noms(m.scene_collections),
       ),
-      summaryRow(`Profils (${m.profiles.length})`, listOrDash(m.profiles)),
-      summaryRow(
+      detailsRow(`Profils (${m.profiles.length})`, noms(m.profiles)),
+      detailsRow(
         `Plugins (${m.plugins.length})`,
-        listOrDash(m.plugins.map((p) => p.name)),
+        m.plugins.map((p) => ({ nom: p.name, detail: formatBytes(p.size) })),
       ),
-      summaryRow("Assets", `${m.assets.length} fichier(s)`),
+      detailsRow(
+        `Assets (${m.assets.length})`,
+        m.assets.map((a) => ({ nom: a.file_name, detail: formatBytes(a.size) })),
+      ),
       summaryRow("Taille du fichier", formatBytes(preview.backup_file_size)),
     );
     for (const s of preview.services) {
@@ -786,6 +854,143 @@ async function runRestore() {
   }
 }
 
+/* ---------- Copies de sécurité ---------- */
+
+function dateCopie(c: CopieSecurite): string {
+  return c.date ? new Date(c.date).toLocaleString("fr-FR") : c.nom;
+}
+
+function backupItem(c: CopieSecurite): HTMLElement {
+  const item = document.createElement("div");
+  item.className = "remap-item";
+  const header = document.createElement("div");
+  header.className = "remap-item-header";
+  const titre = document.createElement("span");
+  titre.className = "remap-item-title";
+  titre.textContent = dateCopie(c);
+  const taille = document.createElement("span");
+  taille.className = "remap-badge";
+  taille.textContent = formatBytes(c.taille);
+  header.append(titre, taille);
+  const chemin = document.createElement("p");
+  chemin.className = "remap-usage";
+  chemin.textContent = c.chemin;
+  const actions = document.createElement("div");
+  actions.className = "backup-actions";
+  const revenir = document.createElement("button");
+  revenir.type = "button";
+  revenir.className = "btn secondary btn-revenir";
+  revenir.textContent = "Revenir à cette configuration";
+  revenir.disabled = obsRunning;
+  revenir.addEventListener("click", () => void revenirACopie(c));
+  const jeter = document.createElement("button");
+  jeter.type = "button";
+  jeter.className = "btn secondary";
+  jeter.textContent = "Mettre à la corbeille";
+  jeter.addEventListener("click", () => void jeterCopie(c));
+  actions.append(revenir, jeter);
+  item.append(header, chemin, actions);
+  return item;
+}
+
+async function afficherCopies(note?: HTMLElement) {
+  hideError();
+  try {
+    const copies = await invoke<CopieSecurite[]>("lister_copies_securite");
+    const liste = $("backups-list");
+    if (copies.length === 0) {
+      const vide = document.createElement("p");
+      vide.className = "remap-intro";
+      vide.textContent = "Aucune copie de sécurité sur cet ordinateur pour l'instant.";
+      liste.replaceChildren(vide);
+    } else {
+      liste.replaceChildren(...copies.map(backupItem));
+    }
+    $("backups-warnings").replaceChildren(...(note ? [note] : []));
+    show("backups");
+  } catch (e) {
+    showError(String(e));
+  }
+}
+
+async function revenirACopie(c: CopieSecurite) {
+  hideError();
+  if (await obsBloqueLOperation()) return;
+  const confirme = await ask(
+    `Votre configuration OBS actuelle sera remplacée par celle du ${dateCopie(c)}. ` +
+      `Elle sera elle-même conservée comme copie de sécurité.`,
+    {
+      title: "Revenir à cette configuration ?",
+      kind: "warning",
+      okLabel: "Revenir",
+      cancelLabel: "Annuler",
+    },
+  );
+  if (!confirme) return;
+  try {
+    const ancienne = await invoke<string | null>("revenir_a_copie", { chemin: c.chemin });
+    await afficherCopies(
+      noteItem(
+        `Configuration du ${dateCopie(c)} remise en place.` +
+          (ancienne ? ` L'ancienne configuration est conservée dans ${ancienne}.` : ""),
+        "note",
+      ),
+    );
+  } catch (e) {
+    showError(String(e));
+  }
+}
+
+async function jeterCopie(c: CopieSecurite) {
+  hideError();
+  const confirme = await ask(
+    `La copie du ${dateCopie(c)} (${formatBytes(c.taille)}) sera placée dans la corbeille ` +
+      `Windows, d'où vous pourrez encore la récupérer.`,
+    {
+      title: "Mettre cette copie à la corbeille ?",
+      kind: "warning",
+      okLabel: "Mettre à la corbeille",
+      cancelLabel: "Annuler",
+    },
+  );
+  if (!confirme) return;
+  try {
+    await invoke("jeter_copie", { chemin: c.chemin });
+    await afficherCopies(noteItem(`Copie du ${dateCopie(c)} placée dans la corbeille.`, "note"));
+  } catch (e) {
+    showError(String(e));
+  }
+}
+
+/* ---------- Ouverture directe : double-clic, glisser-déposer ---------- */
+
+/** Pendant une opération, une nouvelle sauvegarde ne doit rien interrompre. */
+const operationEnCours = () => ecranCourant === "progress";
+
+function deposerFichier(chemin: string | undefined) {
+  if (!chemin || operationEnCours()) return;
+  if (!chemin.toLowerCase().endsWith(".obsbackup")) {
+    showError(
+      "Ce fichier n'est pas une sauvegarde StreamPod : déposez un fichier .obsbackup.",
+    );
+    return;
+  }
+  void ouvrirSauvegarde(chemin);
+}
+
+function ecouterGlisserDeposer() {
+  const voile = $("drop-overlay");
+  void getCurrentWebview().onDragDropEvent((event) => {
+    const p = event.payload;
+    if (p.type === "enter" || p.type === "over") {
+      voile.classList.toggle("hidden", operationEnCours());
+    } else {
+      voile.classList.add("hidden");
+      if (p.type === "drop") deposerFichier(p.paths[0]);
+    }
+  });
+}
+
 /* ---------- Câblage ---------- */
 
 window.addEventListener("DOMContentLoaded", () => {
@@ -798,6 +1003,7 @@ window.addEventListener("DOMContentLoaded", () => {
     void runRestore();
   });
   $("error-close").addEventListener("click", hideError);
+  $("btn-open-backups").addEventListener("click", () => void afficherCopies());
   $("btn-cancel-operation").addEventListener("click", demanderAnnulation);
   $("btn-reveal").addEventListener("click", () => {
     if (!revealTarget) return;
@@ -817,6 +1023,15 @@ window.addEventListener("DOMContentLoaded", () => {
   });
 
   void refreshObsStatus();
+  ecouterGlisserDeposer();
+  // Double-clic sur un .obsbackup : au lancement, ou renvoyé par une 2e
+  // instance vers cette fenêtre (plugin single-instance).
+  void invoke<string | null>("fichier_au_lancement").then((chemin) => {
+    if (chemin) void ouvrirSauvegarde(chemin);
+  });
+  void listen<string>("streampod://ouvrir", (event) => {
+    if (!operationEnCours()) void ouvrirSauvegarde(event.payload);
+  });
   // Le statut OBS (ouvert/fermé) se rafraîchit périodiquement, sauf pendant une
   // sauvegarde ou une restauration : le bandeau est alors masqué par l'écran de
   // progression, et le backend a déjà vérifié qu'OBS était fermé au démarrage.

@@ -350,15 +350,29 @@ fn extract_entry(
 /// Retourne le chemin du `.bak` créé, ou `None` si aucune configuration
 /// n'existait (première restauration).
 fn basculer_config(target: &Path, tmp: &Path, bak: &Path) -> Result<Option<String>, String> {
-    basculer_config_avec(target, tmp, bak, |from, to| std::fs::rename(from, to))
+    basculer_config_avec(target, tmp, bak, true, |from, to| std::fs::rename(from, to))
+}
+
+/// Retour à une copie de sécurité (`copie` prend la place de `target`, mise
+/// de côté dans `bak`) : même garantie de rollback, mais la copie n'est
+/// jamais supprimée en cas d'échec.
+pub(crate) fn basculer_vers_copie(
+    target: &Path,
+    copie: &Path,
+    bak: &Path,
+    rename: impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> Result<Option<String>, String> {
+    basculer_config_avec(target, copie, bak, false, rename)
 }
 
 /// Variante à fonction de rename injectable, pour tester les scénarios
-/// d'échec de façon déterministe.
+/// d'échec de façon déterministe. `nettoyer_tmp` : supprimer `tmp` si la
+/// bascule échoue (extraction temporaire), jamais pour une copie de sécurité.
 fn basculer_config_avec(
     target: &Path,
     tmp: &Path,
     bak: &Path,
+    nettoyer_tmp: bool,
     rename: impl Fn(&Path, &Path) -> std::io::Result<()>,
 ) -> Result<Option<String>, String> {
     let mut previous_backup = None;
@@ -366,7 +380,9 @@ fn basculer_config_avec(
         if let Err(e) = rename(target, bak) {
             // Rien n'a encore bougé : la configuration active est intacte et
             // l'extraction temporaire peut être supprimée sans risque.
-            let _ = std::fs::remove_dir_all(tmp);
+            if nettoyer_tmp {
+                let _ = std::fs::remove_dir_all(tmp);
+            }
             return Err(err(
                 "Impossible de mettre de côté la configuration existante (OBS ouvert ?)",
                 e,
@@ -377,7 +393,9 @@ fn basculer_config_avec(
     if let Err(e) = rename(tmp, target) {
         if previous_backup.is_none() {
             // Première restauration : rien à remettre en place.
-            let _ = std::fs::remove_dir_all(tmp);
+            if nettoyer_tmp {
+                let _ = std::fs::remove_dir_all(tmp);
+            }
             return Err(err("Mise en place de la nouvelle configuration", e));
         }
         if let Err(rb) = rename(bak, target) {
@@ -393,7 +411,9 @@ fn basculer_config_avec(
             ));
         }
         // Rollback réussi : ne pas laisser traîner le dossier temporaire.
-        let _ = std::fs::remove_dir_all(tmp);
+        if nettoyer_tmp {
+            let _ = std::fs::remove_dir_all(tmp);
+        }
         return Err(format!(
             "La restauration a échoué ({e}). Votre configuration d'origine a été remise en \
              place : la configuration OBS active n'a pas été modifiée."
@@ -874,7 +894,7 @@ mod tests {
         std::fs::create_dir(&target).unwrap();
         std::fs::write(target.join("ancienne.txt"), "ancienne config").unwrap();
 
-        let e = super::basculer_config_avec(&target, &tmp, &bak, |_from, _to| {
+        let e = super::basculer_config_avec(&target, &tmp, &bak, true, |_from, _to| {
             Err(std::io::Error::other("sabotage : verrou simulé"))
         })
         .expect_err("la mise de côté aurait dû échouer");
@@ -895,7 +915,7 @@ mod tests {
         std::fs::write(target.join("ancienne.txt"), "ancienne config").unwrap();
 
         // Échec déterministe du second rename (tmp → target) via injection.
-        let e = super::basculer_config_avec(&target, &tmp, &bak, |from, to| {
+        let e = super::basculer_config_avec(&target, &tmp, &bak, true, |from, to| {
             if from == tmp {
                 Err(std::io::Error::other("sabotage : verrou simulé"))
             } else {
@@ -923,7 +943,7 @@ mod tests {
 
         // Seul le rename n°1 (mise de côté) réussit ; tout le reste échoue,
         // y compris le rollback.
-        let e = super::basculer_config_avec(&target, &tmp, &bak, |from, to| {
+        let e = super::basculer_config_avec(&target, &tmp, &bak, true, |from, to| {
             if from == target {
                 std::fs::rename(from, to)
             } else {

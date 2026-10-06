@@ -17,7 +17,7 @@ embarquer votre clé de stream.
 ---
 
 Changer d'ordinateur, streamer en déplacement, réinstaller Windows : StreamPod
-réunit vos **scènes, profils, paramètres, plugins et assets** dans une seule
+réunit vos **scènes, profils, paramètres, assets et la liste de vos plugins** dans une seule
 archive transportable sur clé USB, et remet tout en place de l'autre côté.
 Aucune connexion réseau, aucune télémétrie : **100 % local**.
 
@@ -114,8 +114,17 @@ L'interface tient en deux boutons.
 qui sera inclus (scènes, profils, plugins, taille des assets), puis vous
 demande où écrire le fichier `.obsbackup`.
 
-**Restaurer** - choisissez un `.obsbackup`, vérifiez le résumé, confirmez le
-remappage du matériel si nécessaire, et StreamPod remet votre configuration en place.
+**Restaurer** - choisissez un `.obsbackup` (ou double-cliquez dessus, ou
+déposez-le sur la fenêtre), vérifiez le résumé, confirmez le remappage du
+matériel si nécessaire, et StreamPod remet votre configuration en place. Les
+listes du résumé se déplient pour voir chaque collection, profil, plugin et
+asset.
+
+**Copies de sécurité** - chaque restauration conserve votre configuration
+précédente (`obs-studio.bak-<date>`). L'écran « Copies de sécurité » les liste
+avec leur date et leur taille : revenez à l'une d'elles en un clic (la
+configuration actuelle devient à son tour une copie), ou placez celles devenues
+inutiles dans la corbeille Windows.
 
 > [!IMPORTANT]
 > OBS doit être **fermé** pendant une sauvegarde ou une restauration. StreamPod
