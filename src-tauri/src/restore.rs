@@ -1,6 +1,8 @@
 //! Pipeline de restauration : fichier .obsbackup → configuration OBS.
 
-use crate::backup::{asset_mapping_from_manifest, Manifest, Progress, MSG_ANNULATION};
+use crate::backup::{
+    asset_mapping_from_manifest, Manifest, Progress, FORMAT_VERSION, MSG_ANNULATION,
+};
 use crate::{devices, obs, remap, sanitize, scenes};
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -99,7 +101,23 @@ fn read_manifest(archive: &mut ZipArchive<File>) -> Result<Manifest, String> {
     entry
         .read_to_string(&mut text)
         .map_err(|e| err("Lecture du manifest", e))?;
-    serde_json::from_str(&text).map_err(|e| err("Manifest illisible", e))
+    let valeur: serde_json::Value =
+        serde_json::from_str(&text).map_err(|e| err("Manifest illisible", e))?;
+    // Vérifié avant la désérialisation complète : un format futur peut avoir
+    // changé de structure, l'utilisateur doit lire « mettez à jour » et non
+    // « manifest illisible ».
+    let format = valeur
+        .get("format_version")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    if format > u64::from(FORMAT_VERSION) {
+        return Err(
+            "Cette sauvegarde a été créée par une version plus récente de StreamPod. \
+             Mettez StreamPod à jour pour la restaurer."
+                .to_string(),
+        );
+    }
+    serde_json::from_value(valeur).map_err(|e| err("Manifest illisible", e))
 }
 
 /// Lit une sauvegarde et prépare le résumé avant restauration.
@@ -114,6 +132,17 @@ pub fn preview(backup_path: &Path) -> Result<RestorePreview, String> {
     let config_exists = obs::config_dir().is_some();
 
     let mut warnings = Vec::new();
+    if obs::version_plus_recente(
+        manifest.obs_version.as_deref(),
+        installed_version.as_deref(),
+    ) {
+        warnings.push(format!(
+            "Cette sauvegarde vient d'OBS {}, plus récent que la version installée ici ({}). \
+             Certains réglages pourraient être ignorés : mettez OBS à jour avant de restaurer.",
+            manifest.obs_version.as_deref().unwrap_or_default(),
+            installed_version.as_deref().unwrap_or_default()
+        ));
+    }
     if !obs_installed {
         warnings.push(
             "OBS Studio ne semble pas installé sur cet ordinateur. Installez-le d'abord \

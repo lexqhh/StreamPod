@@ -11,6 +11,14 @@ const FAKE_TOKEN: &str = "oauthTOKENsecret123";
 const FAKE_WS_PASSWORD: &str = "WSPASS_ULTRASECRET";
 const FAKE_DB_TOKEN: &str = "SQLITE_TOKEN_ULTRASECRET";
 
+/// Les variables STREAMPOD_* sont globales au processus : les tests qui les
+/// posent s'exécutent l'un après l'autre.
+static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn verrou_env() -> std::sync::MutexGuard<'static, ()> {
+    ENV.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Construit une fausse arborescence %APPDATA%\obs-studio.
 fn build_fake_config(root: &Path, asset: &Path) {
     let scenes = root.join("basic").join("scenes");
@@ -150,6 +158,7 @@ fn build_fake_plugins_dir(root: &Path) {
 
 #[test]
 fn backup_puis_restore_round_trip() {
+    let _env = verrou_env();
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
 
@@ -628,6 +637,40 @@ fn backup_echoue_sans_laisser_de_fichier_incomplet() {
         !destination.with_extension("obsbackup.tmp").exists(),
         "le fichier temporaire doit être nettoyé après un échec"
     );
+}
+
+#[test]
+fn archive_de_format_futur_refusee_sans_ecriture() {
+    let _env = verrou_env();
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let archive = root.join("futur.obsbackup");
+    let mut zip = zip::ZipWriter::new(fs::File::create(&archive).unwrap());
+    let opts = zip::write::SimpleFileOptions::default();
+    zip.start_file("manifest.json", opts).unwrap();
+    let manifest = format!(
+        r#"{{ "format_version": {}, "structure": "inconnue" }}"#,
+        backup::FORMAT_VERSION + 1
+    );
+    std::io::Write::write_all(&mut zip, manifest.as_bytes()).unwrap();
+    zip.start_file("config/global.ini", opts).unwrap();
+    std::io::Write::write_all(&mut zip, b"[General]\n").unwrap();
+    zip.finish().unwrap();
+
+    let sandbox = root.join("machine");
+    std::env::set_var("STREAMPOD_CONFIG_DIR", sandbox.join("obs-studio"));
+    std::env::set_var("STREAMPOD_ASSETS_DIR", sandbox.join("OBS-Backup-Assets"));
+    std::env::set_var("STREAMPOD_INSTALL_DIR", sandbox.join("obs-install"));
+
+    for e in [
+        restore::preview(&archive).map(|_| ()).unwrap_err(),
+        restore::restore(&archive, &[], |_| {}, || false)
+            .map(|_| ())
+            .unwrap_err(),
+    ] {
+        assert!(e.contains("version plus récente de StreamPod"), "{e}");
+    }
+    assert!(!sandbox.exists(), "rien ne doit être écrit");
 }
 
 /// Liste les noms de tous les fichiers et dossiers sous `root`.

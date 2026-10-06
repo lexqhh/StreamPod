@@ -127,6 +127,32 @@ pub fn installed_version() -> Option<String> {
     None
 }
 
+/// `major.minor.patch` d'une version OBS (« 32.2.2 », « 30.1 », « 31.0.0-rc1 ») ;
+/// composants absents à 0, `None` si le majeur est illisible.
+fn version_triplet(v: &str) -> Option<(u32, u32, u32)> {
+    let mut parts = v.trim().split('.').map(|p| {
+        let chiffres: String = p.chars().take_while(char::is_ascii_digit).collect();
+        chiffres.parse::<u32>().ok()
+    });
+    let major = parts.next().flatten()?;
+    let minor = parts.next().flatten().unwrap_or(0);
+    let patch = parts.next().flatten().unwrap_or(0);
+    Some((major, minor, patch))
+}
+
+/// L'OBS d'origine est-il strictement plus récent que l'OBS installé ? Faux
+/// dès qu'une des deux versions est absente ou illisible : pas d'alerte sur
+/// un doute.
+pub fn version_plus_recente(origine: Option<&str>, installee: Option<&str>) -> bool {
+    match (
+        origine.and_then(version_triplet),
+        installee.and_then(version_triplet),
+    ) {
+        (Some(o), Some(i)) => o > i,
+        _ => false,
+    }
+}
+
 /// OBS est-il en train de tourner ?
 pub fn is_running() -> bool {
     process_actif(OBS_PROCESS_NAMES)
@@ -221,7 +247,19 @@ pub fn detect() -> ObsInfo {
 
 #[cfg(test)]
 mod tests {
-    use super::process_actif;
+    use super::{process_actif, version_plus_recente};
+
+    #[test]
+    fn comparaison_des_versions_obs() {
+        assert!(version_plus_recente(Some("32.2.2"), Some("30.1")));
+        assert!(version_plus_recente(Some("31.0.1"), Some("31.0.0-rc1")));
+        assert!(!version_plus_recente(Some("30.1"), Some("32.2.2")));
+        assert!(!version_plus_recente(Some("31.0.2"), Some("31.0.2")));
+        assert!(!version_plus_recente(Some("30.1"), Some("30.1.0")));
+        assert!(!version_plus_recente(None, Some("30.1")));
+        assert!(!version_plus_recente(Some("32.0"), None));
+        assert!(!version_plus_recente(Some("inconnue"), Some("30.1")));
+    }
 
     /// L'énumération est vérifiée sans dépendre d'un OBS installé : le binaire
     /// de test lui-même est forcément vivant, un nom inventé ne l'est pas.
