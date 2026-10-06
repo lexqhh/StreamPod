@@ -28,7 +28,7 @@ Aucune connexion réseau, aucune télémétrie : **100 % local**.
 - [Utilisation](#utilisation)
 - [Installation](#installation)
 - [Le format `.obsbackup`](#le-format-obsbackup)
-- [Développement](#développement)
+- [Compiler depuis les sources](#compiler-depuis-les-sources)
 - [Architecture](#architecture)
 - [Notes de version](#notes-de-version)
 
@@ -150,16 +150,22 @@ StreamPod est une application **Windows** (10/11). OBS Studio doit avoir été l
 moins une fois sur la machine pour que son dossier de configuration existe.
 Testé avec OBS Studio 32.2.2.
 
-Le plus simple est de récupérer l'exécutable portable produit par la
-compilation (voir [Développement](#développement)) : `StreamPod.exe` se lance sans
-installation, y compris depuis une clé USB.
+**[Télécharger l'installateur](https://github.com/lexqhh/StreamPod/releases/latest/download/StreamPod-setup.exe)**
+(`StreamPod-setup.exe`) : StreamPod s'installe pour votre session Windows, sans
+droits administrateur, et s'associe aux fichiers `.obsbackup`.
+
+**Version portable** - pour une clé USB ou sans installation :
+[`StreamPod.exe`](https://github.com/lexqhh/StreamPod/releases/latest/download/StreamPod.exe)
+se lance directement, sans rien installer.
+
+Les empreintes SHA-256 de chaque fichier sont publiées avec
+[la release](https://github.com/lexqhh/StreamPod/releases/latest)
+(`SHA256SUMS.txt`).
 
 > [!NOTE]
 > L'exécutable n'étant pas encore signé, Windows SmartScreen peut afficher un
 > avertissement au premier lancement. Choisissez **Informations complémentaires
-> → Exécuter quand même**. StreamPod ne fait aucune requête réseau et ne se met pas à
-> jour tout seul : revenez sur la page de téléchargement pour obtenir une
-> nouvelle version.
+> → Exécuter quand même**.
 
 ## Le format `.obsbackup`
 
@@ -177,16 +183,20 @@ façon jamais réinstallées depuis l'archive, seule la liste du manifeste sert
 (réinstallation manuelle). Les archives plus anciennes qui contiennent un
 dossier `plugins/` restent restaurables : ces entrées sont simplement ignorées.
 
-## Développement
+## Compiler depuis les sources
 
 Prérequis : [Node.js](https://nodejs.org/), la [toolchain Rust](https://rustup.rs/)
 et les [prérequis Tauri pour Windows](https://tauri.app/start/prerequisites/).
 
 ```bash
 npm install
-npm run tauri dev      # lance l'app en mode développement
-npm run tauri build    # produit l'exécutable + installateur (src-tauri/target/release)
+npm run tauri dev                    # lance l'app en mode développement
+npm run tauri build -- --no-bundle   # exécutable seul (src-tauri/target/release)
 ```
+
+`npm run tauri build` sans `--no-bundle` produit aussi l'installateur et sa
+signature de mise à jour : il exige la clé privée de signature
+(`TAURI_SIGNING_PRIVATE_KEY`), réservée aux releases officielles.
 
 ### Tests
 
