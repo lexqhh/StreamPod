@@ -42,7 +42,13 @@ Aucune connexion réseau, aucune télémétrie : **100 % local**.
 - **Assets embarqués et rechemins automatiques** - images, vidéos, sons et
   overlays sont déposés dans `Documents\OBS-Backup-Assets\<date>`, un dossier
   propre à chaque restauration (rien n'est jamais écrasé), et les chemins sont
-  réécrits dans les scènes pour pointer au bon endroit sur le nouveau PC.
+  réécrits dans les scènes pour pointer au bon endroit sur le nouveau PC. Les
+  dossiers d'un diaporama ou d'une playlist VLC sont embarqués eux aussi.
+- **Polices signalées** - les polices utilisées par vos textes sont comparées à
+  celles du nouveau PC : l'aperçu liste celles à installer (les fichiers de
+  police ne sont pas embarqués, pour des raisons de licence).
+- **Archive vérifiée** - après l'écriture, chaque fichier de l'archive est relu
+  et contrôlé avant d'annoncer « Sauvegarde terminée ».
 - **Remappage du matériel** - quand un micro, une webcam ou une sortie audio
   n'existe pas sur la machine cible, StreamPod propose des remplaçants classés par
   pertinence. Vous confirmez chaque association ; rien n'est choisi à votre
@@ -150,9 +156,10 @@ installation, y compris depuis une clé USB.
 Un `.obsbackup` est une simple archive ZIP :
 
 ```
-manifest.json      # version du format, version d'OBS, plugins, table des assets
+manifest.json      # version du format, version d'OBS, plugins, assets, polices
 config/            # copie assainie de %APPDATA%\obs-studio
 assets/<n>/        # fichiers médias référencés par les scènes
+assets/d<n>/       # contenu des dossiers de diaporama ou de playlist
 ```
 
 Les plugins tiers ne sont **pas** embarqués : leurs DLL ne seraient de toute

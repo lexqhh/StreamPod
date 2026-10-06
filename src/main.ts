@@ -27,6 +27,9 @@ interface BackupPreview {
   plugins: PluginInfo[];
   asset_count: number;
   asset_total_size: number;
+  asset_dirs: number;
+  assets: { chemin: string; taille: number }[];
+  fonts: string[];
   missing_assets: string[];
   excluded_assets: string[];
   browser_sources: number;
@@ -48,6 +51,8 @@ interface Manifest {
   profiles: string[];
   plugins: PluginInfo[];
   assets: { file_name: string; size: number }[];
+  asset_dirs: { original_path: string; archive_dir: string }[];
+  fonts: string[];
 }
 
 interface ServiceProfil {
@@ -64,6 +69,7 @@ interface RestorePreview {
   installed_version: string | null;
   config_exists: boolean;
   services: ServiceProfil[];
+  missing_fonts: string[];
   warnings: string[];
 }
 
@@ -335,6 +341,7 @@ const STEP_LABELS: Record<string, string> = {
   assets: "Assets",
   plugins: "Plugins",
   finalize: "Finalisation",
+  verify: "Vérification",
   extract: "Extraction",
   rewrite: "Mise à jour des scènes",
   remap: "Périphériques",
@@ -388,7 +395,11 @@ async function startBackupFlow() {
       ),
       summaryRow(
         "Assets (images, vidéos, sons…)",
-        `${preview.asset_count} fichier(s) - ${formatBytes(preview.asset_total_size)}`,
+        `${preview.asset_count} fichier(s)` +
+          (preview.asset_dirs > 0
+            ? `, dont ${preview.asset_dirs} dossier(s) de diaporama ou de playlist`
+            : "") +
+          ` - ${formatBytes(preview.asset_total_size)}`,
       ),
     );
     const warnings = $("backup-warnings");

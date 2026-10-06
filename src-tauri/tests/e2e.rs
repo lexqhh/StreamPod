@@ -796,6 +796,125 @@ fn archive_de_format_futur_refusee_sans_ecriture() {
     assert!(!sandbox.exists(), "rien ne doit être écrit");
 }
 
+#[test]
+fn diaporama_dossier_et_polices_restaures() {
+    let _env = verrou_env();
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+
+    // Dossier de diaporama : 2 images, un fichier non média, un sous-dossier
+    // (non parcouru, comme OBS).
+    let photos = root.join("photos");
+    fs::create_dir_all(photos.join("sous-dossier")).unwrap();
+    fs::write(photos.join("a.png"), b"PNG-A").unwrap();
+    fs::write(photos.join("b.JPG"), b"JPG-B").unwrap();
+    fs::write(photos.join("notes.txt"), b"pas un media").unwrap();
+    fs::write(photos.join("sous-dossier").join("c.png"), b"PNG-C").unwrap();
+    let photos_json = photos.to_string_lossy().replace('\\', "/");
+
+    let config_src = root.join("obs-studio");
+    let scenes = config_src.join("basic").join("scenes");
+    fs::create_dir_all(&scenes).unwrap();
+    fs::write(
+        scenes.join("Diapo.json"),
+        format!(
+            r#"{{ "name": "Diapo", "sources": [
+  {{ "id": "slideshow_v2", "settings": {{ "files": [ {{ "value": "{photos_json}", "hidden": false }} ] }} }},
+  {{ "id": "text_gdiplus_v3", "settings": {{ "font": {{ "face": "Arial", "size": 32 }} }} }},
+  {{ "id": "text_ft2_source_v2", "settings": {{ "font": {{ "face": "Police Introuvable XYZ" }} }} }}
+] }}"#
+        ),
+    )
+    .unwrap();
+
+    let apercu = backup::preview(&config_src, None, None, None).unwrap();
+    assert_eq!(apercu.asset_dirs, 1);
+    assert_eq!(apercu.asset_count, 2);
+    assert_eq!(apercu.asset_total_size, 10);
+    assert_eq!(apercu.fonts, ["Arial", "Police Introuvable XYZ"]);
+
+    let backup_file = root.join("diapo.obsbackup");
+    let summary = backup::create(
+        &config_src,
+        None,
+        None,
+        None,
+        &backup_file,
+        |_| {},
+        || false,
+    )
+    .unwrap();
+    assert_eq!(summary.assets, 2);
+
+    let sandbox = root.join("machine2");
+    std::env::set_var("STREAMPOD_CONFIG_DIR", sandbox.join("obs-studio"));
+    std::env::set_var("STREAMPOD_ASSETS_DIR", sandbox.join("OBS-Backup-Assets"));
+    std::env::set_var("STREAMPOD_INSTALL_DIR", sandbox.join("obs-install"));
+    std::env::set_var("STREAMPOD_POLICES", "arial;Segoe UI");
+
+    let apercu = restore::preview(&backup_file).unwrap();
+    std::env::remove_var("STREAMPOD_POLICES");
+    assert_eq!(apercu.manifest.asset_dirs.len(), 1);
+    assert_eq!(apercu.missing_fonts, ["Police Introuvable XYZ"]);
+    assert!(apercu
+        .warnings
+        .iter()
+        .any(|w| w.starts_with("Polices à installer : Police Introuvable XYZ")));
+
+    let result = restore::restore(&backup_file, &[], |_| {}, || false).unwrap();
+    assert_eq!(result.assets_restored, 2);
+    let dossier = Path::new(result.assets_dir.as_deref().unwrap()).join("d0");
+    assert!(dossier.join("a.png").is_file());
+    assert!(dossier.join("b.JPG").is_file());
+    assert!(!dossier.join("notes.txt").exists());
+    assert!(!dossier.join("sous-dossier").exists());
+    let scene: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(sandbox.join("obs-studio/basic/scenes/Diapo.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        scene["sources"][0]["settings"]["files"][0]["value"],
+        dossier.to_string_lossy().replace('\\', "/"),
+        "le chemin du dossier pointe vers son emplacement restauré"
+    );
+}
+
+#[test]
+fn archive_corrompue_detectee() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let asset = root.join("assets-src").join("overlay.png");
+    fs::create_dir_all(asset.parent().unwrap()).unwrap();
+    fs::write(&asset, b"FAUX-PNG-CONTENU-STOCKE").unwrap();
+    let config_src = root.join("obs-studio");
+    build_fake_config(&config_src, &asset);
+    let backup_file = root.join("ok.obsbackup");
+    let etapes = std::sync::Mutex::new(Vec::<String>::new());
+    backup::create(
+        &config_src,
+        None,
+        None,
+        None,
+        &backup_file,
+        |p| etapes.lock().unwrap().push(p.step),
+        || false,
+    )
+    .unwrap();
+    assert!(etapes.lock().unwrap().iter().any(|e| e == "verify"));
+    backup::verifier_archive(&backup_file, &|| false).unwrap();
+
+    // Un octet altéré dans un asset stocké tel quel : le CRC32 ne correspond plus.
+    let mut octets = fs::read(&backup_file).unwrap();
+    let pos = octets
+        .windows(8)
+        .position(|w| w == b"FAUX-PNG")
+        .expect("asset stocké sans compression");
+    octets[pos] ^= 0xFF;
+    fs::write(&backup_file, octets).unwrap();
+    let e = backup::verifier_archive(&backup_file, &|| false).unwrap_err();
+    assert!(e.contains("ne se relit pas correctement"), "{e}");
+}
+
 /// Liste les noms de tous les fichiers et dossiers sous `root`.
 fn walkdir_noms(root: &Path) -> Vec<String> {
     let mut out = Vec::new();

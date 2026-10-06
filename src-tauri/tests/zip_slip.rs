@@ -17,6 +17,8 @@ fn manifest_minimal() -> Manifest {
         profiles: vec![],
         plugins: vec![],
         assets: vec![],
+        asset_dirs: vec![],
+        fonts: vec![],
     }
 }
 

@@ -3,7 +3,7 @@
 use crate::backup::{
     asset_mapping_from_manifest, Manifest, Progress, FORMAT_VERSION, MSG_ANNULATION,
 };
-use crate::{devices, obs, remap, sanitize, scenes};
+use crate::{devices, obs, polices, remap, sanitize, scenes};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -85,6 +85,8 @@ pub struct RestorePreview {
     /// sécurité automatique).
     pub config_exists: bool,
     pub services: Vec<ServiceProfil>,
+    /// Polices utilisées par les scènes mais absentes de ce PC.
+    pub missing_fonts: Vec<String>,
     pub warnings: Vec<String>,
 }
 
@@ -270,6 +272,14 @@ pub fn preview(backup_path: &Path) -> Result<RestorePreview, String> {
             s.serveur.as_deref().unwrap_or("non renseigné")
         ));
     }
+    let missing_fonts = polices::polices_absentes(&manifest.fonts);
+    if !missing_fonts.is_empty() {
+        warnings.push(format!(
+            "Polices à installer : {}. Sans elles, vos textes s'afficheront avec une \
+             police de remplacement.",
+            missing_fonts.join(" · ")
+        ));
+    }
     warnings.push(
         "Ne restaurez que vos propres sauvegardes ou celles de personnes de confiance : \
          leurs réglages s'appliqueront à votre OBS."
@@ -283,6 +293,7 @@ pub fn preview(backup_path: &Path) -> Result<RestorePreview, String> {
         installed_version,
         config_exists,
         services,
+        missing_fonts,
         warnings,
     })
 }
@@ -575,6 +586,21 @@ pub fn restore_avec_garde(
         }
         tmp_assets = Some(transit);
     }
+    // Dossiers de diaporama ou de playlist : le chemin du dossier est
+    // réécrit vers son emplacement restauré (validé comme les assets).
+    let mut dossiers_dest: Vec<(String, PathBuf)> = Vec::new();
+    if let Some(assets_dir) = assets_dir.as_ref().filter(|_| tmp_assets.is_some()) {
+        for d in &manifest.asset_dirs {
+            let rel = d
+                .archive_dir
+                .strip_prefix("assets/")
+                .ok_or_else(|| chemin_suspect(&d.archive_dir))?;
+            dossiers_dest.push((
+                scenes::normalize_path(&d.original_path),
+                chemin_relatif_sur(assets_dir, rel)?,
+            ));
+        }
+    }
 
     // Toute erreur entre l'extraction et la bascule supprime les deux
     // dossiers temporaires : ni configuration partielle, ni assets de
@@ -672,6 +698,12 @@ pub fn restore_avec_garde(
                     dest.finale.to_string_lossy().replace('\\', "/"),
                 );
             }
+        }
+        for (original, dossier) in &dossiers_dest {
+            mapping.insert(
+                original.clone(),
+                dossier.to_string_lossy().replace('\\', "/"),
+            );
         }
         // Les scripts (modules["scripts-tool"]) sont neutralisés dans toutes
         // les collections : OBS les exécuterait au lancement. Leurs fichiers

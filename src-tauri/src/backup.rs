@@ -87,6 +87,29 @@ pub struct Manifest {
     pub profiles: Vec<String>,
     pub plugins: Vec<PluginInfo>,
     pub assets: Vec<AssetEntry>,
+    /// Dossiers de diaporama ou de playlist VLC : leurs fichiers sont des
+    /// `assets` ordinaires sous `archive_dir` (une ancienne version de
+    /// StreamPod les restaure sans réécrire le chemin du dossier).
+    #[serde(default)]
+    pub asset_dirs: Vec<AssetDir>,
+    /// Polices des sources texte, comparées à celles du PC cible. Les
+    /// fichiers de police ne sont jamais embarqués (licences).
+    #[serde(default)]
+    pub fonts: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssetDir {
+    /// Chemin du dossier tel qu'écrit dans les scènes.
+    pub original_path: String,
+    /// Dossier dans l'archive (`assets/d<n>`).
+    pub archive_dir: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AssetApercu {
+    pub chemin: String,
+    pub taille: u64,
 }
 
 /// Résumé présenté à l'utilisateur avant de lancer la sauvegarde.
@@ -99,6 +122,11 @@ pub struct BackupPreview {
     pub plugins: Vec<PluginInfo>,
     pub asset_count: usize,
     pub asset_total_size: u64,
+    /// Dossiers de diaporama ou de playlist (leurs fichiers sont comptés
+    /// dans `asset_count`).
+    pub asset_dirs: usize,
+    pub assets: Vec<AssetApercu>,
+    pub fonts: Vec<String>,
     pub missing_assets: Vec<String>,
     /// Fichiers référencés mais exclus par sécurité (exécutables, fichiers
     /// de configuration ou de secrets, dossier de config OBS).
@@ -178,10 +206,47 @@ struct Analyse {
     /// Fichiers référencés mais exclus par sécurité (exécutables, secrets,
     /// fichiers du dossier de config OBS).
     exclus: Vec<String>,
+    /// Dossiers de diaporama ou de playlist et leurs fichiers médias.
+    dossiers: Vec<(String, Vec<PathBuf>)>,
+    polices: Vec<String>,
     sources_navigateur: usize,
 }
 
-/// Formes normalisées d'un chemin (brute et canonique, sans préfixe `\?\`).
+impl Analyse {
+    /// Fichiers à archiver, ceux des dossiers compris.
+    fn tous_les_fichiers(&self) -> impl Iterator<Item = &PathBuf> {
+        self.fichiers
+            .iter()
+            .chain(self.dossiers.iter().flat_map(|(_, f)| f))
+    }
+}
+
+/// Extensions médias retenues dans un dossier de diaporama ou de playlist
+/// (contenu non récursif, comme OBS).
+const EXTENSIONS_MEDIAS: &[&str] = &[
+    "png", "jpg", "jpeg", "jpe", "gif", "bmp", "tga", "webp", "psd", "jxr", "mp4", "m4v", "mkv",
+    "mov", "avi", "webm", "flv", "ts", "mts", "m2ts", "wmv", "mpg", "mpeg", "mp3", "wav", "flac",
+    "ogg", "opus", "m4a", "aac", "wma",
+];
+
+/// Fichiers médias directement dans `dossier`, triés, hors exclusions.
+fn medias_du_dossier(dossier: &Path, racines_config: &[String]) -> Vec<PathBuf> {
+    let mut fichiers: Vec<PathBuf> = std::fs::read_dir(dossier)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_file()
+                && EXTENSIONS_MEDIAS.contains(&scenes::extension_de(&p.to_string_lossy()).as_str())
+                && !asset_exclu(p, racines_config)
+        })
+        .collect();
+    fichiers.sort();
+    fichiers
+}
+
+/// Formes normalisées d'un chemin (brute et canonique, sans préfixe `\\?\`).
 fn formes_normalisees(p: &Path) -> Vec<String> {
     let mut formes = vec![scenes::normalize_path(&p.to_string_lossy())];
     if let Ok(c) = p.canonicalize() {
@@ -233,6 +298,16 @@ fn analyser_scenes(config_dir: &Path) -> Analyse {
             analyse.manquants.push(r);
         }
     }
+    analyse.dossiers = refs
+        .listes_media
+        .into_iter()
+        .filter(|d| Path::new(d).is_dir())
+        .map(|d| {
+            let fichiers = medias_du_dossier(Path::new(&d), &racines_config);
+            (d, fichiers)
+        })
+        .collect();
+    analyse.polices = refs.polices.into_iter().collect();
     analyse
 }
 
@@ -326,11 +401,14 @@ pub fn preview(
         .filter_map(|p| p.file_name().map(|s| s.to_string_lossy().into_owned()))
         .collect();
     let analyse = analyser_scenes(config_dir);
-    let assets = &analyse.fichiers;
-    let asset_total_size = assets
-        .iter()
-        .map(|p| p.metadata().map(|m| m.len()).unwrap_or(0))
-        .sum();
+    let assets: Vec<AssetApercu> = analyse
+        .tous_les_fichiers()
+        .map(|p| AssetApercu {
+            chemin: p.to_string_lossy().into_owned(),
+            taille: p.metadata().map(|m| m.len()).unwrap_or(0),
+        })
+        .collect();
+    let asset_total_size = assets.iter().map(|a| a.taille).sum();
     let plugins = third_party_plugins(install_dir, plugins_dir);
     Ok(BackupPreview {
         config_dir: config_dir.to_string_lossy().into_owned(),
@@ -340,8 +418,11 @@ pub fn preview(
         plugins,
         asset_count: assets.len(),
         asset_total_size,
+        asset_dirs: analyse.dossiers.len(),
+        assets,
         missing_assets: analyse.manquants,
         excluded_assets: analyse.exclus,
+        fonts: analyse.polices,
         browser_sources: analyse.sources_navigateur,
     })
 }
@@ -470,6 +551,24 @@ pub fn create_avec_garde(
             archive_path: format!("assets/{i}/{file_name}"),
             file_name,
             size: p.metadata().map(|m| m.len()).unwrap_or(0),
+        });
+    }
+    // Dossiers de diaporama ou de playlist : leurs fichiers sous assets/d<n>/.
+    let mut asset_dirs: Vec<AssetDir> = Vec::new();
+    for (j, (dossier, fichiers)) in analyse.dossiers.iter().enumerate() {
+        let archive_dir = format!("assets/d{j}");
+        for p in fichiers {
+            let file_name = scenes::file_name_of(p);
+            assets.push(AssetEntry {
+                original_path: p.to_string_lossy().into_owned(),
+                archive_path: format!("{archive_dir}/{file_name}"),
+                file_name,
+                size: p.metadata().map(|m| m.len()).unwrap_or(0),
+            });
+        }
+        asset_dirs.push(AssetDir {
+            original_path: dossier.clone(),
+            archive_dir,
         });
     }
 
@@ -675,6 +774,8 @@ pub fn create_avec_garde(
         profiles: profile_names.clone(),
         plugins: plugins.clone(),
         assets: assets.clone(),
+        asset_dirs,
+        fonts: analyse.polices.clone(),
     };
     zip.start_file("manifest.json", deflate)
         .map_err(|e| err("Écriture de l'archive", e))?;
@@ -682,6 +783,8 @@ pub fn create_avec_garde(
         .map_err(|e| err("Écriture de l'archive", e))?;
     zip.finish()
         .map_err(|e| err("Finalisation de l'archive", e))?;
+    report("verify", "Vérification de l'archive…".into(), 0, 1);
+    verifier_archive(&tmp_path, &est_annule)?;
     if obs_ouvert() {
         return Err(crate::obs::OBS_RUNNING_MSG.to_string());
     }
@@ -698,6 +801,44 @@ pub fn create_avec_garde(
         plugins: plugins.len(),
         assets: assets.len(),
     })
+}
+
+fn archive_illisible(e: impl std::fmt::Display) -> String {
+    err(
+        "L'archive écrite ne se relit pas correctement (disque ou clé USB défaillant ?)",
+        e,
+    )
+}
+
+/// Relit chaque entrée d'une archive jusqu'au bout - la crate `zip` contrôle
+/// alors le CRC32 - puis valide le manifest : la garantie qu'une sauvegarde
+/// copiée sur clé USB se relira.
+pub fn verifier_archive(path: &Path, est_annule: &dyn Fn() -> bool) -> Result<(), String> {
+    let mut archive = zip::ZipArchive::new(File::open(path).map_err(archive_illisible)?)
+        .map_err(archive_illisible)?;
+    let mut buf = vec![0u8; 512 * 1024];
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(archive_illisible)?;
+        loop {
+            if est_annule() {
+                return Err(MSG_ANNULATION.to_string());
+            }
+            if entry.read(&mut buf).map_err(archive_illisible)? == 0 {
+                break;
+            }
+        }
+    }
+    let mut texte = String::new();
+    archive
+        .by_name("manifest.json")
+        .map_err(archive_illisible)?
+        .read_to_string(&mut texte)
+        .map_err(archive_illisible)?;
+    let manifest: Manifest = serde_json::from_str(&texte).map_err(archive_illisible)?;
+    if manifest.format_version != FORMAT_VERSION {
+        return Err(archive_illisible("version de format inattendue"));
+    }
+    Ok(())
 }
 
 /// Table de correspondance chemin d'origine (normalisé) → chemin d'archive,

@@ -30,7 +30,7 @@ chrono = { version = "0.4", features = ["clock"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
-windows = { version = "0.62.2", features = ["Win32_Media_Audio", "Win32_Media_DirectShow", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_Ole", "Win32_UI_Shell_PropertiesSystem", "Win32_Devices_FunctionDiscovery", "Win32_System_Diagnostics_ToolHelp"] }
+windows = { version = "0.62.2", features = ["Win32_Media_Audio", "Win32_Media_DirectShow", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_System_Ole", "Win32_UI_Shell_PropertiesSystem", "Win32_Devices_FunctionDiscovery", "Win32_System_Diagnostics_ToolHelp", "Win32_Graphics_DirectWrite"] }
 
 # Uniquement pour la détection des processus hors Windows : sur Windows, elle
 # passe par l'API ToolHelp de la crate `windows` (voir obs::process_actif).
