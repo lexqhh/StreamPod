@@ -17,7 +17,7 @@ embarquer votre clé de stream.
 ---
 
 Changer d'ordinateur, streamer en déplacement, réinstaller Windows : StreamPod
-réunit vos **scènes, profils, paramètres, plugins et assets** dans une seule
+réunit vos **scènes, profils, paramètres, assets et la liste de vos plugins** dans une seule
 archive transportable sur clé USB, et remet tout en place de l'autre côté.
 Aucune connexion réseau, aucune télémétrie : **100 % local**.
 
@@ -30,6 +30,7 @@ Aucune connexion réseau, aucune télémétrie : **100 % local**.
 - [Le format `.obsbackup`](#le-format-obsbackup)
 - [Développement](#développement)
 - [Architecture](#architecture)
+- [Notes de version](#notes-de-version)
 
 ## Fonctionnalités
 
@@ -40,8 +41,15 @@ Aucune connexion réseau, aucune télémétrie : **100 % local**.
   (`obs-studio.bak-<date>`) avant la bascule ; en cas d'échec, elle est remise
   en place automatiquement. Jamais d'OBS sans configuration.
 - **Assets embarqués et rechemins automatiques** - images, vidéos, sons et
-  overlays sont déposés dans `Documents\OBS-Backup-Assets`, et les chemins sont
-  réécrits dans les scènes pour pointer au bon endroit sur le nouveau PC.
+  overlays sont déposés dans `Documents\OBS-Backup-Assets\<date>`, un dossier
+  propre à chaque restauration (rien n'est jamais écrasé), et les chemins sont
+  réécrits dans les scènes pour pointer au bon endroit sur le nouveau PC. Les
+  dossiers d'un diaporama ou d'une playlist VLC sont embarqués eux aussi.
+- **Polices signalées** - les polices utilisées par vos textes sont comparées à
+  celles du nouveau PC : l'aperçu liste celles à installer (les fichiers de
+  police ne sont pas embarqués, pour des raisons de licence).
+- **Archive vérifiée** - après l'écriture, chaque fichier de l'archive est relu
+  et contrôlé avant d'annoncer « Sauvegarde terminée ».
 - **Remappage du matériel** - quand un micro, une webcam ou une sortie audio
   n'existe pas sur la machine cible, StreamPod propose des remplaçants classés par
   pertinence. Vous confirmez chaque association ; rien n'est choisi à votre
@@ -68,7 +76,19 @@ Ne sont **jamais** enregistrés dans l'archive :
 Les fichiers de configuration des plugins sont assainis par liste blanche : seuls
 les `.json` et `.ini` nettoyés sont archivés (par exemple le mot de passe
 d'obs-websocket est retiré), tout autre format opaque est exclu avec un
-avertissement.
+avertissement. Les réglages des scripts OBS sont nettoyés de la même façon, et
+les fichiers référencés par vos scènes qui ressemblent à des secrets ou à des
+programmes (`.bak`, `.env`, `.json`, `.ini`, `.exe`, `.dll`…) ne sont jamais
+embarqués : l'aperçu les liste.
+
+À la restauration, une archive est traitée comme une donnée non fiable :
+
+- les **scripts** (Lua, Python) sont restaurés mais **désactivés** - la liste
+  des scripts à réactiver dans **Outils → Scripts** s'affiche à la fin ;
+- le serveur **obs-websocket** est désactivé (il régénère son mot de passe au
+  prochain lancement) ;
+- l'aperçu affiche le **serveur de diffusion** de chaque profil et signale un
+  serveur personnalisé.
 
 > [!TIP]
 > Après une restauration, il suffit de re-saisir votre clé de stream ou de
@@ -95,8 +115,17 @@ L'interface tient en deux boutons.
 qui sera inclus (scènes, profils, plugins, taille des assets), puis vous
 demande où écrire le fichier `.obsbackup`.
 
-**Restaurer** - choisissez un `.obsbackup`, vérifiez le résumé, confirmez le
-remappage du matériel si nécessaire, et StreamPod remet votre configuration en place.
+**Restaurer** - choisissez un `.obsbackup` (ou double-cliquez dessus, ou
+déposez-le sur la fenêtre), vérifiez le résumé, confirmez le remappage du
+matériel si nécessaire, et StreamPod remet votre configuration en place. Les
+listes du résumé se déplient pour voir chaque collection, profil, plugin et
+asset.
+
+**Copies de sécurité** - chaque restauration conserve votre configuration
+précédente (`obs-studio.bak-<date>`). L'écran « Copies de sécurité » les liste
+avec leur date et leur taille : revenez à l'une d'elles en un clic (la
+configuration actuelle devient à son tour une copie), ou placez celles devenues
+inutiles dans la corbeille Windows.
 
 > [!IMPORTANT]
 > OBS doit être **fermé** pendant une sauvegarde ou une restauration. StreamPod
@@ -137,9 +166,10 @@ installation, y compris depuis une clé USB.
 Un `.obsbackup` est une simple archive ZIP :
 
 ```
-manifest.json      # version du format, version d'OBS, plugins, table des assets
+manifest.json      # version du format, version d'OBS, plugins, assets, polices
 config/            # copie assainie de %APPDATA%\obs-studio
 assets/<n>/        # fichiers médias référencés par les scènes
+assets/d<n>/       # contenu des dossiers de diaporama ou de playlist
 ```
 
 Les plugins tiers ne sont **pas** embarqués : leurs DLL ne seraient de toute
@@ -172,8 +202,9 @@ dans un bac à sable et **vérifie qu'aucun secret ne fuit** dans l'archive
 
 > [!WARNING]
 > Les tests ne touchent **jamais** votre vraie configuration OBS. Les variables
-> d'environnement `STREAMPOD_CONFIG_DIR`, `STREAMPOD_INSTALL_DIR`, `STREAMPOD_ASSETS_DIR` et
-> `STREAMPOD_OBS_VERSION` redirigent tous les chemins vers des dossiers temporaires.
+> d'environnement `STREAMPOD_CONFIG_DIR`, `STREAMPOD_INSTALL_DIR`, `STREAMPOD_ASSETS_DIR`,
+> `STREAMPOD_PLUGINS_DIR`, `STREAMPOD_OBS_VERSION` et `STREAMPOD_POLICES` redirigent
+> tous les chemins et détections vers des valeurs de test.
 
 ## Architecture
 
@@ -184,13 +215,36 @@ TypeScript** vanilla, en français.
 |---|---|
 | `src-tauri/src/obs.rs` | Détection d'OBS (config, installation, version, processus) |
 | `src-tauri/src/sanitize.rs` | Suppression des secrets (clé de stream, tokens, cookies) |
-| `src-tauri/src/scenes.rs` | Extraction et réécriture des chemins d'assets |
+| `src-tauri/src/scenes.rs` | Analyse des scènes (chemins, dossiers, polices, scripts) et réécriture |
 | `src-tauri/src/backup.rs` | Pipeline de sauvegarde → `.obsbackup` |
 | `src-tauri/src/restore.rs` | Restauration avec sauvegarde de secours et rollback automatique |
 | `src-tauri/src/devices.rs` | Inventaire du matériel Windows (audio, vidéo) |
 | `src-tauri/src/remap.rs` | Diagnostic et application du remappage matériel |
+| `src-tauri/src/polices.rs` | Polices installées (DirectWrite) |
+| `src-tauri/src/copies.rs` | Copies de sécurité : liste, retour, corbeille |
 | `src-tauri/src/lib.rs` | Commandes exposées au frontend |
 | `src/main.ts` | Toute la logique de l'interface |
+
+## Notes de version
+
+### 0.2.0
+
+- **Sécurité** : toutes les pistes de l'audit du 2026-09-18 sont corrigées.
+  Scripts OBS désactivés à la restauration, programmes jamais embarqués,
+  obs-websocket désactivé, serveur de diffusion affiché dans l'aperçu,
+  fichiers de secrets exclus des assets, décompression bornée, noms de fichiers
+  Windows piégés refusés, assets jamais écrasés, OBS revérifié avant la mise
+  en place.
+- **Complétude** : dossiers de diaporama et de playlist VLC embarqués, polices
+  manquantes signalées, archive relue et contrôlée après l'écriture.
+- **Ergonomie** : ouverture d'un `.obsbackup` par double-clic ou
+  glisser-déposer, écran « Copies de sécurité » (retour à une configuration
+  précédente, corbeille), résumés dépliables.
+- **Compatibilité** : une sauvegarde créée par une version plus récente de
+  StreamPod est refusée avec un message clair ; une sauvegarde d'un OBS plus
+  récent que celui installé est signalée.
+- **Outillage** : CI GitHub Actions et release automatisée avec empreintes
+  SHA-256.
 
 ## Droits d'auteur
 

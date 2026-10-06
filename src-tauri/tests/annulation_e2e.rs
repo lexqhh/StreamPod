@@ -2,10 +2,10 @@
 //! s'arrête proprement, nettoie ses fichiers temporaires et ne touche ni la
 //! configuration active ni le dossier d'assets définitif.
 
-use streampod_lib::{backup, restore};
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use streampod_lib::{backup, restore};
 
 /// Construit une fausse configuration OBS minimale avec un asset.
 fn build_fake_config(root: &Path, asset: &Path) {
@@ -43,8 +43,16 @@ fn backup_annule_ne_laisse_ni_archive_ni_temporaire() {
     build_fake_config(&config_src, &asset);
 
     let destination = root.join("annulee.obsbackup");
-    let e = backup::create(&config_src, None, None, None, &destination, |_| {}, annule_apres(2))
-        .expect_err("la sauvegarde annulée doit échouer");
+    let e = backup::create(
+        &config_src,
+        None,
+        None,
+        None,
+        &destination,
+        |_| {},
+        annule_apres(2),
+    )
+    .expect_err("la sauvegarde annulée doit échouer");
     assert_eq!(e, backup::MSG_ANNULATION);
     assert!(!destination.exists(), "aucune archive ne doit être créée");
     assert!(
@@ -65,7 +73,16 @@ fn restore_annule_pendant_extraction_nettoie_et_preserve_le_disque() {
     let config_src = root.join("obs-studio-src");
     build_fake_config(&config_src, &asset);
     let backup_file = root.join("sauvegarde.obsbackup");
-    backup::create(&config_src, None, None, None, &backup_file, |_| {}, || false).unwrap();
+    backup::create(
+        &config_src,
+        None,
+        None,
+        None,
+        &backup_file,
+        |_| {},
+        || false,
+    )
+    .unwrap();
 
     // Machine cible : bac à sable redirigé, jamais la vraie config.
     let sandbox = root.join("machine-cible");
@@ -79,7 +96,10 @@ fn restore_annule_pendant_extraction_nettoie_et_preserve_le_disque() {
     assert_eq!(e, backup::MSG_ANNULATION);
 
     // Ni configuration installée, ni temporaire orphelin, ni asset déposé.
-    assert!(!config_dst.exists(), "aucune configuration ne doit être mise en place");
+    assert!(
+        !config_dst.exists(),
+        "aucune configuration ne doit être mise en place"
+    );
     assert!(
         !sandbox.join("OBS-Backup-Assets").exists(),
         "le dossier d'assets définitif ne doit pas être touché"

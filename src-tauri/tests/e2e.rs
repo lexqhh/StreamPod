@@ -1,21 +1,47 @@
 //! Test end-to-end : backup → restore sur une fausse configuration OBS.
 //! Vérifie notamment qu'aucune clé de stream ne fuit dans l'archive.
 
-use streampod_lib::{backup, restore};
 use std::fs;
 use std::io::Read;
 use std::path::Path;
+use streampod_lib::{backup, restore};
 
 const FAKE_STREAM_KEY: &str = "live_9999_ULTRASECRETSTREAMKEY";
 const FAKE_TOKEN: &str = "oauthTOKENsecret123";
 const FAKE_WS_PASSWORD: &str = "WSPASS_ULTRASECRET";
 const FAKE_DB_TOKEN: &str = "SQLITE_TOKEN_ULTRASECRET";
+const FAKE_SCRIPT_TOKEN: &str = "SCRIPT_TOKEN_ULTRASECRET";
+const FAKE_API_KEY: &str = "INI_APIKEY_ULTRASECRET";
+
+/// Les variables STREAMPOD_* sont globales au processus : les tests qui les
+/// posent s'exécutent l'un après l'autre.
+static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn verrou_env() -> std::sync::MutexGuard<'static, ()> {
+    ENV.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 /// Construit une fausse arborescence %APPDATA%\obs-studio.
 fn build_fake_config(root: &Path, asset: &Path) {
     let scenes = root.join("basic").join("scenes");
     fs::create_dir_all(&scenes).unwrap();
-    let asset_json = asset.to_string_lossy().replace('\\', "/");
+    let json = |p: &Path| p.to_string_lossy().replace('\\', "/");
+    let asset_json = json(asset);
+    // Script OBS (restauré mais désactivé), exécutable et secrets référencés
+    // par des sources (jamais archivés).
+    let script = asset.with_file_name("chat.lua");
+    fs::write(&script, "-- script de chat").unwrap();
+    let exe = asset.with_file_name("outil.exe");
+    fs::write(&exe, "MZ-FAUX-EXE").unwrap();
+    let env = asset.with_file_name(".env");
+    fs::write(&env, format!("BOT_TOKEN={FAKE_TOKEN}")).unwrap();
+    let bak = root
+        .join("basic")
+        .join("profiles")
+        .join("Principal")
+        .join("service.json.bak");
+    let (script_json, exe_json, env_json, bak_json) =
+        (json(&script), json(&exe), json(&env), json(&bak));
     fs::write(
         scenes.join("Ma Collection.json"),
         format!(
@@ -24,8 +50,15 @@ fn build_fake_config(root: &Path, asset: &Path) {
   "sources": [
     {{ "id": "image_source", "settings": {{ "file": "{asset_json}" }} }},
     {{ "id": "ffmpeg_source", "settings": {{ "local_file": "C:/introuvable/video.mp4" }} }},
+    {{ "id": "ffmpeg_source", "settings": {{ "local_file": "{exe_json}" }} }},
+    {{ "id": "text_gdiplus_v3", "settings": {{ "read_from_file": true, "file": "{bak_json}" }} }},
+    {{ "id": "text_gdiplus_v3", "settings": {{ "read_from_file": true, "file": "{env_json}" }} }},
     {{ "hotkeys": {{ "key": "OBS_KEY_F1" }} }}
-  ]
+  ],
+  "modules": {{ "scripts-tool": [ {{
+    "path": "{script_json}",
+    "settings": {{ "oauth_token": "{FAKE_SCRIPT_TOKEN}", "bascule": [ {{ "key": "OBS_KEY_F9" }} ] }}
+  }} ] }}
 }}"#
         ),
     )
@@ -53,6 +86,15 @@ fn build_fake_config(root: &Path, asset: &Path) {
     )
     .unwrap();
 
+    // Second profil diffusant vers un serveur personnalisé.
+    let perso = root.join("basic").join("profiles").join("Perso");
+    fs::create_dir_all(&perso).unwrap();
+    fs::write(
+        perso.join("service.json"),
+        r#"{ "type": "rtmp_custom", "settings": { "server": "rtmp://exemple.test/live" } }"#,
+    )
+    .unwrap();
+
     fs::write(root.join("global.ini"), "[General]\nFirstRun=false\n").unwrap();
 
     let ws = root.join("plugin_config").join("obs-websocket");
@@ -61,8 +103,17 @@ fn build_fake_config(root: &Path, asset: &Path) {
     fs::write(
         ws.join("config.json"),
         format!(
-            r#"{{"server_enabled":true,"server_password":"{FAKE_WS_PASSWORD}","auth":{{"server_password":"{FAKE_WS_PASSWORD}"}}}}"#
+            r#"{{"server_enabled":true,"first_load":false,"auth_required":true,"server_password":"{FAKE_WS_PASSWORD}","auth":{{"server_password":"{FAKE_WS_PASSWORD}"}}}}"#
         ),
+    )
+    .unwrap();
+
+    // INI de plugin tiers avec une clé d'API.
+    let plugin_ini = root.join("plugin_config").join("plugin-ini");
+    fs::create_dir_all(&plugin_ini).unwrap();
+    fs::write(
+        plugin_ini.join("reglages.ini"),
+        format!("[Compte]\nApiKey={FAKE_API_KEY}\nLangue=fr\n"),
     )
     .unwrap();
 
@@ -112,7 +163,10 @@ fn build_fake_install(root: &Path) {
     fs::create_dir_all(&plugins).unwrap();
     fs::write(plugins.join("win-capture.dll"), "OFFICIEL").unwrap();
     fs::write(plugins.join("move-transition.dll"), "PLUGIN-TIERS").unwrap();
-    let data = root.join("data").join("obs-plugins").join("move-transition");
+    let data = root
+        .join("data")
+        .join("obs-plugins")
+        .join("move-transition");
     fs::create_dir_all(&data).unwrap();
     fs::write(data.join("locale.ini"), "[fr-FR]\nNom=Move").unwrap();
 }
@@ -122,16 +176,32 @@ fn build_fake_install(root: &Path) {
 fn build_fake_plugins_dir(root: &Path) {
     let shader = root.join("plugins").join("obs-shaderfilter");
     fs::create_dir_all(shader.join("bin").join("64bit")).unwrap();
-    fs::write(shader.join("bin").join("64bit").join("obs-shaderfilter.dll"), "PLUGIN-TIERS").unwrap();
+    fs::write(
+        shader
+            .join("bin")
+            .join("64bit")
+            .join("obs-shaderfilter.dll"),
+        "PLUGIN-TIERS",
+    )
+    .unwrap();
     fs::create_dir_all(shader.join("data").join("locale")).unwrap();
-    fs::write(shader.join("data").join("locale").join("fr-FR.ini"), "Nom=Shader").unwrap();
-    let doublon = root.join("plugins").join("move-transition").join("bin").join("64bit");
+    fs::write(
+        shader.join("data").join("locale").join("fr-FR.ini"),
+        "Nom=Shader",
+    )
+    .unwrap();
+    let doublon = root
+        .join("plugins")
+        .join("move-transition")
+        .join("bin")
+        .join("64bit");
     fs::create_dir_all(&doublon).unwrap();
     fs::write(doublon.join("move-transition.dll"), "PLUGIN-TIERS").unwrap();
 }
 
 #[test]
 fn backup_puis_restore_round_trip() {
+    let _env = verrou_env();
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
 
@@ -146,6 +216,23 @@ fn backup_puis_restore_round_trip() {
     build_fake_install(&install_src);
     let programdata_src = root.join("programdata-src");
     build_fake_plugins_dir(&programdata_src);
+
+    // --- Aperçu : exécutable et secrets référencés exclus, et listés ---
+    let apercu = backup::preview(&config_src, None, None, None).unwrap();
+    assert_eq!(apercu.asset_count, 2, "overlay.png et chat.lua");
+    assert_eq!(
+        apercu.excluded_assets.len(),
+        3,
+        "{:?}",
+        apercu.excluded_assets
+    );
+    for exclu in ["outil.exe", ".env", "service.json.bak"] {
+        assert!(
+            apercu.excluded_assets.iter().any(|e| e.ends_with(exclu)),
+            "{exclu} devait être exclu : {:?}",
+            apercu.excluded_assets
+        );
+    }
 
     // --- Sauvegarde ---
     let backup_file = root.join("ma-sauvegarde.obsbackup");
@@ -181,9 +268,12 @@ fn backup_puis_restore_round_trip() {
         "l'exclusion des fichiers de plugin au format non pris en charge doit être signalée"
     );
     assert_eq!(summary.scene_collections, 1);
-    assert_eq!(summary.profiles, 1);
-    assert_eq!(summary.plugins, 2, "seuls les plugins tiers, sans doublon, doivent être inclus");
-    assert_eq!(summary.assets, 1);
+    assert_eq!(summary.profiles, 2);
+    assert_eq!(
+        summary.plugins, 2,
+        "seuls les plugins tiers, sans doublon, doivent être inclus"
+    );
+    assert_eq!(summary.assets, 2);
     assert!(
         !backup_file.with_extension("obsbackup.tmp").exists(),
         "le fichier temporaire doit avoir été basculé vers la destination finale"
@@ -233,10 +323,17 @@ fn backup_puis_restore_round_trip() {
         "un JSON de plugin invalide ne doit jamais être copié tel quel dans l'archive"
     );
     assert!(
-        !names
-            .iter()
-            .any(|n| n.contains("plugin-exotique") || n.ends_with(".sqlite") || n.ends_with(".yaml")),
+        !names.iter().any(|n| n.contains("plugin-exotique")
+            || n.ends_with(".sqlite")
+            || n.ends_with(".yaml")),
         "sous plugin_config/, seuls les .json et .ini assainis sont archivés (liste blanche)"
+    );
+
+    assert!(
+        !names.iter().any(|n| n.ends_with(".exe")
+            || n.ends_with(".env")
+            || n.starts_with("assets/") && n.ends_with(".bak")),
+        "ni exécutable ni fichier de secrets parmi les assets : {names:?}"
     );
 
     for i in 0..zip.len() {
@@ -264,6 +361,16 @@ fn backup_puis_restore_round_trip() {
             "le token du fichier de plugin opaque a fui dans {}",
             entry.name()
         );
+        assert!(
+            !text.contains(FAKE_SCRIPT_TOKEN),
+            "le token des réglages de script a fui dans {}",
+            entry.name()
+        );
+        assert!(
+            !text.contains(FAKE_API_KEY),
+            "la clé d'API du .ini de plugin a fui dans {}",
+            entry.name()
+        );
     }
 
     // Le config.json d'obs-websocket est assaini (mot de passe retiré) mais
@@ -273,16 +380,31 @@ fn backup_puis_restore_round_trip() {
         .unwrap();
     let mut ws_text = String::new();
     ws_entry.read_to_string(&mut ws_text).unwrap();
-    assert!(ws_text.contains("server_enabled"));
+    let ws: serde_json::Value = serde_json::from_str(&ws_text).unwrap();
+    assert_eq!(
+        ws["server_enabled"], false,
+        "obs-websocket désactivé à la sauvegarde"
+    );
+    assert_eq!(
+        ws["first_load"], true,
+        "mot de passe régénéré par obs-websocket"
+    );
+    assert_eq!(ws["auth_required"], true);
     assert!(!ws_text.contains("server_password"));
     drop(ws_entry);
 
     // La touche de raccourci "key" des scènes ne doit PAS être supprimée
     // (seul service.json est nettoyé).
-    let mut scene_entry = zip.by_name("config/basic/scenes/Ma Collection.json").unwrap();
+    let mut scene_entry = zip
+        .by_name("config/basic/scenes/Ma Collection.json")
+        .unwrap();
     let mut scene_text = String::new();
     scene_entry.read_to_string(&mut scene_text).unwrap();
     assert!(scene_text.contains("OBS_KEY_F1"));
+    assert!(
+        scene_text.contains("OBS_KEY_F9"),
+        "raccourci des réglages de script conservé"
+    );
     drop(scene_entry);
 
     // --- Restauration sur la fausse machine "destination" ---
@@ -310,9 +432,24 @@ fn backup_puis_restore_round_trip() {
     std::env::set_var("STREAMPOD_INSTALL_DIR", &install_dst);
     std::env::set_var("STREAMPOD_OBS_VERSION", "31.1.0"); // même version majeure
 
+    let apercu = restore::preview(&backup_file).unwrap();
+    assert_eq!(apercu.services.len(), 2);
+    assert!(
+        apercu
+            .warnings
+            .iter()
+            .any(|w| w.contains("Perso") && w.contains("rtmp://exemple.test/live")),
+        "serveur personnalisé signalé : {:?}",
+        apercu.warnings
+    );
+    assert!(apercu
+        .warnings
+        .iter()
+        .any(|w| w.contains("personnes de confiance")));
+
     let result = restore::restore(&backup_file, &[], |_| {}, || false).unwrap();
     assert_eq!(result.scene_collections, 1);
-    assert_eq!(result.assets_restored, 1);
+    assert_eq!(result.assets_restored, 2);
     assert_eq!(result.plugins_status, "manual");
     assert!(result.previous_config_backup.is_none());
 
@@ -327,16 +464,36 @@ fn backup_puis_restore_round_trip() {
         .is_file());
 
     // L'asset est restauré et le JSON de scènes pointe vers lui.
-    let restored_asset = assets_dst.join("0").join("overlay.png");
+    let assets_restaures = Path::new(result.assets_dir.as_deref().unwrap());
+    assert!(
+        assets_restaures.starts_with(&assets_dst) && assets_restaures != assets_dst,
+        "assets dans un sous-dossier horodaté : {}",
+        assets_restaures.display()
+    );
+    let restored_asset = assets_restaures.join("1").join("overlay.png");
     assert!(restored_asset.is_file());
+    // Le script est restauré mais retiré de la collection : à réactiver.
+    let script_restaure = assets_restaures.join("0").join("chat.lua");
+    assert!(script_restaure.is_file());
+    assert_eq!(
+        result.scripts,
+        [script_restaure.to_string_lossy().replace('\\', "/")]
+    );
     let scene_text = fs::read_to_string(
-        config_dst.join("basic").join("scenes").join("Ma Collection.json"),
+        config_dst
+            .join("basic")
+            .join("scenes")
+            .join("Ma Collection.json"),
     )
     .unwrap();
     let expected = restored_asset.to_string_lossy().replace('\\', "/");
     assert!(
         scene_text.contains(&expected),
         "le chemin d'asset n'a pas été réécrit : {scene_text}"
+    );
+    assert!(
+        !scene_text.contains("chat.lua"),
+        "le script ne doit pas être réactivé automatiquement : {scene_text}"
     );
 
     // Le plugin tiers n'est JAMAIS copié dans l'installation OBS de la
@@ -354,7 +511,13 @@ fn backup_puis_restore_round_trip() {
         .join("move-transition")
         .join("locale.ini")
         .exists());
-    assert_eq!(result.plugins, vec!["move-transition".to_string(), "obs-shaderfilter".to_string()]);
+    assert_eq!(
+        result.plugins,
+        vec![
+            "move-transition".to_string(),
+            "obs-shaderfilter".to_string()
+        ]
+    );
 
     // Aucun secret dans la config restaurée.
     let service_text = fs::read_to_string(
@@ -375,11 +538,14 @@ fn backup_puis_restore_round_trip() {
     )
     .unwrap();
     assert!(!ws_config_text.contains(FAKE_WS_PASSWORD));
+    assert!(ws_config_text.contains(r#""server_enabled": false"#));
 
     // --- Seconde restauration : l'ancienne config est mise de côté ---
     std::thread::sleep(std::time::Duration::from_millis(1100)); // horodatage différent
     let result2 = restore::restore(&backup_file, &[], |_| {}, || false).unwrap();
-    let bak = result2.previous_config_backup.expect("copie de sécurité attendue");
+    let bak = result2
+        .previous_config_backup
+        .expect("copie de sécurité attendue");
     assert!(Path::new(&bak).join("global.ini").is_file());
 }
 
@@ -426,7 +592,16 @@ fn diagnostic_remappage_en_lecture_seule() {
 
     // --- Sauvegarde ---
     let backup_file = root.join("diag.obsbackup");
-    backup::create(&config_src, None, None, Some("32.1.2".to_string()), &backup_file, |_| {}, || false).unwrap();
+    backup::create(
+        &config_src,
+        None,
+        None,
+        Some("32.1.2".to_string()),
+        &backup_file,
+        |_| {},
+        || false,
+    )
+    .unwrap();
     let archive_avant = fs::read(&backup_file).unwrap();
 
     // --- Inventaire cible factice : le micro « valide » existe encore, la
@@ -518,14 +693,31 @@ fn backup_refuse_destination_dans_le_dossier_de_config() {
         config_src.join("piege.obsbackup"),
         config_src.join("basic").join("piege.obsbackup"),
     ] {
-        let err = backup::create(&config_src, None, None, None, &destination, |_| {}, || false)
-            .expect_err("une destination dans le dossier de config doit être refusée");
+        let err = backup::create(
+            &config_src,
+            None,
+            None,
+            None,
+            &destination,
+            |_| {},
+            || false,
+        )
+        .expect_err("une destination dans le dossier de config doit être refusée");
         assert!(err.contains("dossier de configuration"), "{err}");
         assert!(!destination.exists(), "aucun fichier ne doit être créé");
     }
 
     // Une destination ailleurs reste acceptée.
-    backup::create(&config_src, None, None, None, &root.join("ok.obsbackup"), |_| {}, || false).unwrap();
+    backup::create(
+        &config_src,
+        None,
+        None,
+        None,
+        &root.join("ok.obsbackup"),
+        |_| {},
+        || false,
+    )
+    .unwrap();
 }
 
 #[test]
@@ -550,8 +742,16 @@ fn backup_echoue_sans_laisser_de_fichier_incomplet() {
     .unwrap();
 
     let destination = root.join("echec.obsbackup");
-    backup::create(&config_src, None, None, None, &destination, |_| {}, || false)
-        .expect_err("un service.json corrompu doit faire échouer la sauvegarde");
+    backup::create(
+        &config_src,
+        None,
+        None,
+        None,
+        &destination,
+        |_| {},
+        || false,
+    )
+    .expect_err("un service.json corrompu doit faire échouer la sauvegarde");
     assert!(
         !destination.exists(),
         "aucune archive incomplète ne doit rester à la destination"
@@ -562,12 +762,167 @@ fn backup_echoue_sans_laisser_de_fichier_incomplet() {
     );
 }
 
+#[test]
+fn archive_de_format_futur_refusee_sans_ecriture() {
+    let _env = verrou_env();
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let archive = root.join("futur.obsbackup");
+    let mut zip = zip::ZipWriter::new(fs::File::create(&archive).unwrap());
+    let opts = zip::write::SimpleFileOptions::default();
+    zip.start_file("manifest.json", opts).unwrap();
+    let manifest = format!(
+        r#"{{ "format_version": {}, "structure": "inconnue" }}"#,
+        backup::FORMAT_VERSION + 1
+    );
+    std::io::Write::write_all(&mut zip, manifest.as_bytes()).unwrap();
+    zip.start_file("config/global.ini", opts).unwrap();
+    std::io::Write::write_all(&mut zip, b"[General]\n").unwrap();
+    zip.finish().unwrap();
+
+    let sandbox = root.join("machine");
+    std::env::set_var("STREAMPOD_CONFIG_DIR", sandbox.join("obs-studio"));
+    std::env::set_var("STREAMPOD_ASSETS_DIR", sandbox.join("OBS-Backup-Assets"));
+    std::env::set_var("STREAMPOD_INSTALL_DIR", sandbox.join("obs-install"));
+
+    for e in [
+        restore::preview(&archive).map(|_| ()).unwrap_err(),
+        restore::restore(&archive, &[], |_| {}, || false)
+            .map(|_| ())
+            .unwrap_err(),
+    ] {
+        assert!(e.contains("version plus récente de StreamPod"), "{e}");
+    }
+    assert!(!sandbox.exists(), "rien ne doit être écrit");
+}
+
+#[test]
+fn diaporama_dossier_et_polices_restaures() {
+    let _env = verrou_env();
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+
+    // Dossier de diaporama : 2 images, un fichier non média, un sous-dossier
+    // (non parcouru, comme OBS).
+    let photos = root.join("photos");
+    fs::create_dir_all(photos.join("sous-dossier")).unwrap();
+    fs::write(photos.join("a.png"), b"PNG-A").unwrap();
+    fs::write(photos.join("b.JPG"), b"JPG-B").unwrap();
+    fs::write(photos.join("notes.txt"), b"pas un media").unwrap();
+    fs::write(photos.join("sous-dossier").join("c.png"), b"PNG-C").unwrap();
+    let photos_json = photos.to_string_lossy().replace('\\', "/");
+
+    let config_src = root.join("obs-studio");
+    let scenes = config_src.join("basic").join("scenes");
+    fs::create_dir_all(&scenes).unwrap();
+    fs::write(
+        scenes.join("Diapo.json"),
+        format!(
+            r#"{{ "name": "Diapo", "sources": [
+  {{ "id": "slideshow_v2", "settings": {{ "files": [ {{ "value": "{photos_json}", "hidden": false }} ] }} }},
+  {{ "id": "text_gdiplus_v3", "settings": {{ "font": {{ "face": "Arial", "size": 32 }} }} }},
+  {{ "id": "text_ft2_source_v2", "settings": {{ "font": {{ "face": "Police Introuvable XYZ" }} }} }}
+] }}"#
+        ),
+    )
+    .unwrap();
+
+    let apercu = backup::preview(&config_src, None, None, None).unwrap();
+    assert_eq!(apercu.asset_dirs, 1);
+    assert_eq!(apercu.asset_count, 2);
+    assert_eq!(apercu.asset_total_size, 10);
+    assert_eq!(apercu.fonts, ["Arial", "Police Introuvable XYZ"]);
+
+    let backup_file = root.join("diapo.obsbackup");
+    let summary = backup::create(
+        &config_src,
+        None,
+        None,
+        None,
+        &backup_file,
+        |_| {},
+        || false,
+    )
+    .unwrap();
+    assert_eq!(summary.assets, 2);
+
+    let sandbox = root.join("machine2");
+    std::env::set_var("STREAMPOD_CONFIG_DIR", sandbox.join("obs-studio"));
+    std::env::set_var("STREAMPOD_ASSETS_DIR", sandbox.join("OBS-Backup-Assets"));
+    std::env::set_var("STREAMPOD_INSTALL_DIR", sandbox.join("obs-install"));
+    std::env::set_var("STREAMPOD_POLICES", "arial;Segoe UI");
+
+    let apercu = restore::preview(&backup_file).unwrap();
+    std::env::remove_var("STREAMPOD_POLICES");
+    assert_eq!(apercu.manifest.asset_dirs.len(), 1);
+    assert_eq!(apercu.missing_fonts, ["Police Introuvable XYZ"]);
+    assert!(apercu
+        .warnings
+        .iter()
+        .any(|w| w.starts_with("Polices à installer : Police Introuvable XYZ")));
+
+    let result = restore::restore(&backup_file, &[], |_| {}, || false).unwrap();
+    assert_eq!(result.assets_restored, 2);
+    let dossier = Path::new(result.assets_dir.as_deref().unwrap()).join("d0");
+    assert!(dossier.join("a.png").is_file());
+    assert!(dossier.join("b.JPG").is_file());
+    assert!(!dossier.join("notes.txt").exists());
+    assert!(!dossier.join("sous-dossier").exists());
+    let scene: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(sandbox.join("obs-studio/basic/scenes/Diapo.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        scene["sources"][0]["settings"]["files"][0]["value"],
+        dossier.to_string_lossy().replace('\\', "/"),
+        "le chemin du dossier pointe vers son emplacement restauré"
+    );
+}
+
+#[test]
+fn archive_corrompue_detectee() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let asset = root.join("assets-src").join("overlay.png");
+    fs::create_dir_all(asset.parent().unwrap()).unwrap();
+    fs::write(&asset, b"FAUX-PNG-CONTENU-STOCKE").unwrap();
+    let config_src = root.join("obs-studio");
+    build_fake_config(&config_src, &asset);
+    let backup_file = root.join("ok.obsbackup");
+    let etapes = std::sync::Mutex::new(Vec::<String>::new());
+    backup::create(
+        &config_src,
+        None,
+        None,
+        None,
+        &backup_file,
+        |p| etapes.lock().unwrap().push(p.step),
+        || false,
+    )
+    .unwrap();
+    assert!(etapes.lock().unwrap().iter().any(|e| e == "verify"));
+    backup::verifier_archive(&backup_file, &|| false).unwrap();
+
+    // Un octet altéré dans un asset stocké tel quel : le CRC32 ne correspond plus.
+    let mut octets = fs::read(&backup_file).unwrap();
+    let pos = octets
+        .windows(8)
+        .position(|w| w == b"FAUX-PNG")
+        .expect("asset stocké sans compression");
+    octets[pos] ^= 0xFF;
+    fs::write(&backup_file, octets).unwrap();
+    let e = backup::verifier_archive(&backup_file, &|| false).unwrap_err();
+    assert!(e.contains("ne se relit pas correctement"), "{e}");
+}
+
 /// Liste les noms de tous les fichiers et dossiers sous `root`.
 fn walkdir_noms(root: &Path) -> Vec<String> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             out.push(entry.file_name().to_string_lossy().into_owned());
             if entry.path().is_dir() {

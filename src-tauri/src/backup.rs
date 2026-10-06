@@ -87,6 +87,29 @@ pub struct Manifest {
     pub profiles: Vec<String>,
     pub plugins: Vec<PluginInfo>,
     pub assets: Vec<AssetEntry>,
+    /// Dossiers de diaporama ou de playlist VLC : leurs fichiers sont des
+    /// `assets` ordinaires sous `archive_dir` (une ancienne version de
+    /// StreamPod les restaure sans réécrire le chemin du dossier).
+    #[serde(default)]
+    pub asset_dirs: Vec<AssetDir>,
+    /// Polices des sources texte, comparées à celles du PC cible. Les
+    /// fichiers de police ne sont jamais embarqués (licences).
+    #[serde(default)]
+    pub fonts: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AssetDir {
+    /// Chemin du dossier tel qu'écrit dans les scènes.
+    pub original_path: String,
+    /// Dossier dans l'archive (`assets/d<n>`).
+    pub archive_dir: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct AssetApercu {
+    pub chemin: String,
+    pub taille: u64,
 }
 
 /// Résumé présenté à l'utilisateur avant de lancer la sauvegarde.
@@ -99,7 +122,15 @@ pub struct BackupPreview {
     pub plugins: Vec<PluginInfo>,
     pub asset_count: usize,
     pub asset_total_size: u64,
+    /// Dossiers de diaporama ou de playlist (leurs fichiers sont comptés
+    /// dans `asset_count`).
+    pub asset_dirs: usize,
+    pub assets: Vec<AssetApercu>,
+    pub fonts: Vec<String>,
     pub missing_assets: Vec<String>,
+    /// Fichiers référencés mais exclus par sécurité (exécutables, fichiers
+    /// de configuration ou de secrets, dossier de config OBS).
+    pub excluded_assets: Vec<String>,
     pub browser_sources: usize,
 }
 
@@ -134,7 +165,8 @@ fn scene_files(config_dir: &Path) -> Vec<PathBuf> {
         .flatten()
         .map(|e| e.path())
         .filter(|p| {
-            p.extension().is_some_and(|e| e.eq_ignore_ascii_case("json"))
+            p.extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("json"))
                 && !p
                     .file_name()
                     .is_some_and(|n| n.to_string_lossy().ends_with(".json.bak"))
@@ -158,11 +190,88 @@ fn profile_dirs(config_dir: &Path) -> Vec<PathBuf> {
     dirs
 }
 
-/// Collecte tous les chemins d'assets référencés par toutes les collections
-/// de scènes. Retourne aussi les chemins référencés mais introuvables.
-fn collect_assets(config_dir: &Path) -> (BTreeSet<PathBuf>, Vec<String>) {
-    let mut found = BTreeSet::new();
-    let mut missing = BTreeSet::new();
+/// Extensions de fichiers de configuration ou de secrets : jamais embarquées
+/// comme assets, même référencées par une scène (`service.json.bak`, `.env`
+/// d'un bot…).
+const EXTENSIONS_SENSIBLES: &[&str] = &[
+    "bak", "json", "ini", "env", "sqlite", "sqlite3", "db", "key", "pem", "pfx", "p12", "kdbx",
+    "yaml", "yml", "toml", "cfg", "conf", "log",
+];
+
+/// Résultat d'une passe unique sur les collections de scènes.
+#[derive(Default)]
+struct Analyse {
+    fichiers: BTreeSet<PathBuf>,
+    manquants: Vec<String>,
+    /// Fichiers référencés mais exclus par sécurité (exécutables, secrets,
+    /// fichiers du dossier de config OBS).
+    exclus: Vec<String>,
+    /// Dossiers de diaporama ou de playlist et leurs fichiers médias.
+    dossiers: Vec<(String, Vec<PathBuf>)>,
+    polices: Vec<String>,
+    sources_navigateur: usize,
+}
+
+impl Analyse {
+    /// Fichiers à archiver, ceux des dossiers compris.
+    fn tous_les_fichiers(&self) -> impl Iterator<Item = &PathBuf> {
+        self.fichiers
+            .iter()
+            .chain(self.dossiers.iter().flat_map(|(_, f)| f))
+    }
+}
+
+/// Extensions médias retenues dans un dossier de diaporama ou de playlist
+/// (contenu non récursif, comme OBS).
+const EXTENSIONS_MEDIAS: &[&str] = &[
+    "png", "jpg", "jpeg", "jpe", "gif", "bmp", "tga", "webp", "psd", "jxr", "mp4", "m4v", "mkv",
+    "mov", "avi", "webm", "flv", "ts", "mts", "m2ts", "wmv", "mpg", "mpeg", "mp3", "wav", "flac",
+    "ogg", "opus", "m4a", "aac", "wma",
+];
+
+/// Fichiers médias directement dans `dossier`, triés, hors exclusions.
+fn medias_du_dossier(dossier: &Path, racines_config: &[String]) -> Vec<PathBuf> {
+    let mut fichiers: Vec<PathBuf> = std::fs::read_dir(dossier)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| {
+            p.is_file()
+                && EXTENSIONS_MEDIAS.contains(&scenes::extension_de(&p.to_string_lossy()).as_str())
+                && !asset_exclu(p, racines_config)
+        })
+        .collect();
+    fichiers.sort();
+    fichiers
+}
+
+/// Formes normalisées d'un chemin (brute et canonique, sans préfixe `\\?\`).
+fn formes_normalisees(p: &Path) -> Vec<String> {
+    let mut formes = vec![scenes::normalize_path(&p.to_string_lossy())];
+    if let Ok(c) = p.canonicalize() {
+        let c = scenes::normalize_path(&c.to_string_lossy());
+        formes.push(c.strip_prefix("//?/").map(str::to_string).unwrap_or(c));
+    }
+    formes
+}
+
+/// Un asset doit-il être exclu de l'archive par sécurité ?
+fn asset_exclu(p: &Path, racines_config: &[String]) -> bool {
+    let texte = p.to_string_lossy();
+    scenes::est_executable(&texte)
+        || EXTENSIONS_SENSIBLES.contains(&scenes::extension_de(&texte).as_str())
+        || formes_normalisees(p).iter().any(|f| {
+            racines_config
+                .iter()
+                .any(|r| f.starts_with(&format!("{}/", r.trim_end_matches('/'))))
+        })
+}
+
+/// Lit chaque collection de scènes une seule fois et classe les chemins
+/// référencés : fichiers à archiver, introuvables ou exclus.
+fn analyser_scenes(config_dir: &Path) -> Analyse {
+    let mut refs = scenes::References::default();
     for scene_file in scene_files(config_dir) {
         let Ok(text) = std::fs::read_to_string(&scene_file) else {
             continue;
@@ -170,73 +279,50 @@ fn collect_assets(config_dir: &Path) -> (BTreeSet<PathBuf>, Vec<String>) {
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
             continue;
         };
-        let mut all_refs = BTreeSet::new();
-        collect_path_like_strings(&value, &mut all_refs);
-        for r in all_refs {
-            let p = PathBuf::from(&r);
-            if p.is_file() {
-                found.insert(p);
-            } else if !p.is_dir() {
-                missing.insert(r);
+        scenes::analyser_collection(&value, &mut refs);
+    }
+    let racines_config = formes_normalisees(config_dir);
+    let mut analyse = Analyse {
+        sources_navigateur: refs.sources_navigateur,
+        ..Analyse::default()
+    };
+    for r in refs.chemins {
+        let p = PathBuf::from(&r);
+        if p.is_file() {
+            if asset_exclu(&p, &racines_config) {
+                analyse.exclus.push(r);
+            } else {
+                analyse.fichiers.insert(p);
             }
+        } else if !p.is_dir() {
+            analyse.manquants.push(r);
         }
     }
-    (found, missing.into_iter().collect())
+    analyse.dossiers = refs
+        .listes_media
+        .into_iter()
+        .filter(|d| Path::new(d).is_dir())
+        .map(|d| {
+            let fichiers = medias_du_dossier(Path::new(&d), &racines_config);
+            (d, fichiers)
+        })
+        .collect();
+    analyse.polices = refs.polices.into_iter().collect();
+    analyse
 }
 
-/// Comme scenes::collect_asset_paths mais garde aussi les chemins absents
-/// du disque (pour prévenir l'utilisateur des assets introuvables).
-fn collect_path_like_strings(value: &serde_json::Value, out: &mut BTreeSet<String>) {
-    match value {
-        serde_json::Value::String(s) => {
-            let b = s.as_bytes();
-            if s.len() >= 4
-                && b[0].is_ascii_alphabetic()
-                && b[1] == b':'
-                && (b[2] == b'\\' || b[2] == b'/')
-                && !s.contains('\n')
-            {
-                out.insert(s.clone());
-            }
-        }
-        serde_json::Value::Array(items) => {
-            for item in items {
-                collect_path_like_strings(item, out);
-            }
-        }
-        serde_json::Value::Object(map) => {
-            for v in map.values() {
-                collect_path_like_strings(v, out);
-            }
-        }
-        _ => {}
+/// Collection de scènes (`basic/scenes/*.json`) réécrite si les réglages de
+/// ses scripts contenaient des champs sensibles ; `None` sinon (copie brute,
+/// raccourcis clavier et format d'origine préservés).
+fn scene_assainie(path: &Path, rel_lower: &str) -> Option<String> {
+    let nom = rel_lower.strip_prefix("basic/scenes/")?;
+    if nom.contains('/') || !nom.ends_with(".json") {
+        return None;
     }
-}
-
-/// Compte les sources navigateur (overlays) dont l'URL pointe vers le web.
-/// Ces URL sont conservées telles quelles dans l'archive (OBS en a besoin pour
-/// réafficher l'overlay) et peuvent contenir un token privé
-/// (`…/overlay/<id>/<TOKEN>` chez StreamElements, Streamlabs…) : l'aperçu
-/// doit prévenir l'utilisateur avant qu'il ne partage le fichier.
-fn count_browser_sources(value: &serde_json::Value) -> usize {
-    match value {
-        serde_json::Value::Array(items) => items.iter().map(count_browser_sources).sum(),
-        serde_json::Value::Object(map) => {
-            let ici = usize::from(
-                map.get("id").and_then(|v| v.as_str()) == Some("browser_source")
-                    && map
-                        .get("settings")
-                        .and_then(|s| s.get("url"))
-                        .and_then(|u| u.as_str())
-                        .is_some_and(|u| {
-                            let u = u.to_ascii_lowercase();
-                            u.starts_with("http://") || u.starts_with("https://")
-                        }),
-            );
-            ici + map.values().map(count_browser_sources).sum::<usize>()
-        }
-        _ => 0,
-    }
+    let mut value: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+    (sanitize::sanitize_scripts_collection(&mut value) > 0)
+        .then(|| serde_json::to_string_pretty(&value).unwrap())
 }
 
 /// DLL présentes directement dans `dir`.
@@ -246,9 +332,7 @@ fn dlls_du_dossier(dir: &Path) -> impl Iterator<Item = PathBuf> {
         .flatten()
         .flatten()
         .map(|e| e.path())
-        .filter(|p| {
-            p.is_file() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("dll"))
-        })
+        .filter(|p| p.is_file() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("dll")))
 }
 
 /// Détecte les plugins tiers aux deux emplacements chargés par OBS :
@@ -316,17 +400,15 @@ pub fn preview(
         .iter()
         .filter_map(|p| p.file_name().map(|s| s.to_string_lossy().into_owned()))
         .collect();
-    let (assets, missing) = collect_assets(config_dir);
-    let browser_sources = scene_files(config_dir)
-        .iter()
-        .filter_map(|p| std::fs::read_to_string(p).ok())
-        .filter_map(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-        .map(|value| count_browser_sources(&value))
-        .sum();
-    let asset_total_size = assets
-        .iter()
-        .map(|p| p.metadata().map(|m| m.len()).unwrap_or(0))
-        .sum();
+    let analyse = analyser_scenes(config_dir);
+    let assets: Vec<AssetApercu> = analyse
+        .tous_les_fichiers()
+        .map(|p| AssetApercu {
+            chemin: p.to_string_lossy().into_owned(),
+            taille: p.metadata().map(|m| m.len()).unwrap_or(0),
+        })
+        .collect();
+    let asset_total_size = assets.iter().map(|a| a.taille).sum();
     let plugins = third_party_plugins(install_dir, plugins_dir);
     Ok(BackupPreview {
         config_dir: config_dir.to_string_lossy().into_owned(),
@@ -336,24 +418,30 @@ pub fn preview(
         plugins,
         asset_count: assets.len(),
         asset_total_size,
-        missing_assets: missing,
-        browser_sources,
+        asset_dirs: analyse.dossiers.len(),
+        assets,
+        missing_assets: analyse.manquants,
+        excluded_assets: analyse.exclus,
+        fonts: analyse.polices,
+        browser_sources: analyse.sources_navigateur,
     })
 }
 
 /// Copie un fichier du disque vers l'archive ZIP. `est_annule` est consulté
 /// entre chaque bloc de 512 Ko pour réagir vite même sur un gros média.
+/// Retourne le nombre d'octets réellement copiés.
 fn zip_file_from_disk(
     zip: &mut ZipWriter<File>,
     src: &Path,
     archive_path: &str,
     options: SimpleFileOptions,
     est_annule: &dyn Fn() -> bool,
-) -> Result<(), String> {
+) -> Result<u64, String> {
     zip.start_file(archive_path, options)
         .map_err(|e| err("Écriture de l'archive", e))?;
     let mut f = File::open(src).map_err(|e| err(&format!("Lecture de {}", src.display()), e))?;
     let mut buf = [0u8; 1024 * 512];
+    let mut copies = 0u64;
     loop {
         if est_annule() {
             return Err(MSG_ANNULATION.to_string());
@@ -366,8 +454,9 @@ fn zip_file_from_disk(
         }
         zip.write_all(&buf[..n])
             .map_err(|e| err("Écriture de l'archive", e))?;
+        copies += n as u64;
     }
-    Ok(())
+    Ok(copies)
 }
 
 /// Le dossier de destination de l'archive est-il le dossier de config OBS
@@ -401,7 +490,7 @@ impl Drop for NettoyageTmp<'_> {
     }
 }
 
-/// Crée le fichier .obsbackup.
+/// Crée le fichier .obsbackup, sans revérifier OBS : voir `create_avec_garde`.
 pub fn create(
     config_dir: &Path,
     install_dir: Option<&Path>,
@@ -410,6 +499,32 @@ pub fn create(
     output_path: &Path,
     progress: impl Fn(Progress),
     est_annule: impl Fn() -> bool,
+) -> Result<BackupSummary, String> {
+    create_avec_garde(
+        config_dir,
+        install_dir,
+        plugins_dir,
+        obs_version,
+        output_path,
+        progress,
+        est_annule,
+        || false,
+    )
+}
+
+/// Comme `create`, mais `obs_ouvert` (injectable en test) est revérifié
+/// avant la mise en place de l'archive : OBS lancé pendant la copie a pu
+/// écrire dans sa config, l'archive serait incohérente.
+#[allow(clippy::too_many_arguments)]
+pub fn create_avec_garde(
+    config_dir: &Path,
+    install_dir: Option<&Path>,
+    plugins_dir: Option<&Path>,
+    obs_version: Option<String>,
+    output_path: &Path,
+    progress: impl Fn(Progress),
+    est_annule: impl Fn() -> bool,
+    obs_ouvert: impl Fn() -> bool,
 ) -> Result<BackupSummary, String> {
     if !config_dir.is_dir() {
         return Err("Dossier de configuration OBS introuvable.".to_string());
@@ -427,15 +542,33 @@ pub fn create(
     report("scan", "Analyse de la configuration…".into(), 0, 1);
 
     // 1. Assets référencés par les scènes.
-    let (asset_paths, _missing) = collect_assets(config_dir);
+    let analyse = analyser_scenes(config_dir);
     let mut assets: Vec<AssetEntry> = Vec::new();
-    for (i, p) in asset_paths.iter().enumerate() {
+    for (i, p) in analyse.fichiers.iter().enumerate() {
         let file_name = scenes::file_name_of(p);
         assets.push(AssetEntry {
             original_path: p.to_string_lossy().into_owned(),
             archive_path: format!("assets/{i}/{file_name}"),
             file_name,
             size: p.metadata().map(|m| m.len()).unwrap_or(0),
+        });
+    }
+    // Dossiers de diaporama ou de playlist : leurs fichiers sous assets/d<n>/.
+    let mut asset_dirs: Vec<AssetDir> = Vec::new();
+    for (j, (dossier, fichiers)) in analyse.dossiers.iter().enumerate() {
+        let archive_dir = format!("assets/d{j}");
+        for p in fichiers {
+            let file_name = scenes::file_name_of(p);
+            assets.push(AssetEntry {
+                original_path: p.to_string_lossy().into_owned(),
+                archive_path: format!("{archive_dir}/{file_name}"),
+                file_name,
+                size: p.metadata().map(|m| m.len()).unwrap_or(0),
+            });
+        }
+        asset_dirs.push(AssetDir {
+            original_path: dossier.clone(),
+            archive_dir,
         });
     }
 
@@ -520,7 +653,8 @@ pub fn create(
         // (basic/scenes/**), qui contiennent des champs `key` légitimes
         // (raccourcis clavier) - celles-ci ne passent jamais par ici car
         // elles ne sont pas sous plugin_config/.
-        let is_plugin_json = rel_lower.starts_with("plugin_config/") && rel_lower.ends_with(".json");
+        let is_plugin_json =
+            rel_lower.starts_with("plugin_config/") && rel_lower.ends_with(".json");
         if is_service_json {
             let text = std::fs::read_to_string(path)
                 .map_err(|e| err(&format!("Lecture de {rel_str}"), e))?;
@@ -548,6 +682,9 @@ pub fn create(
             match parsed {
                 Some(mut value) => {
                     let removed = sanitize::sanitize_json(&mut value);
+                    if sanitize::est_config_obs_websocket(&rel_lower) {
+                        sanitize::neutraliser_obs_websocket(&mut value);
+                    }
                     if removed > 0 {
                         report(
                             "warning",
@@ -587,6 +724,12 @@ pub fn create(
                 i as u64,
                 total_cfg,
             );
+        } else if let Some(collection) = scene_assainie(path, &rel_lower) {
+            // Collection dont des réglages de scripts contenaient un secret.
+            zip.start_file(&archive_path, deflate)
+                .map_err(|e| err("Écriture de l'archive", e))?;
+            zip.write_all(collection.as_bytes())
+                .map_err(|e| err("Écriture de l'archive", e))?;
         } else {
             zip_file_from_disk(&mut zip, path, &archive_path, deflate, &est_annule)?;
         }
@@ -594,7 +737,7 @@ pub fn create(
 
     // 3b. Assets.
     let total_assets = assets.len() as u64;
-    for (i, asset) in assets.iter().enumerate() {
+    for (i, asset) in assets.iter_mut().enumerate() {
         if est_annule() {
             return Err(MSG_ANNULATION.to_string());
         }
@@ -604,7 +747,9 @@ pub fn create(
             i as u64,
             total_assets,
         );
-        zip_file_from_disk(
+        // Taille réelle : c'est le plafond d'extraction à la restauration,
+        // le fichier a pu changer depuis l'analyse.
+        asset.size = zip_file_from_disk(
             &mut zip,
             Path::new(&asset.original_path),
             &asset.archive_path,
@@ -629,12 +774,20 @@ pub fn create(
         profiles: profile_names.clone(),
         plugins: plugins.clone(),
         assets: assets.clone(),
+        asset_dirs,
+        fonts: analyse.polices.clone(),
     };
     zip.start_file("manifest.json", deflate)
         .map_err(|e| err("Écriture de l'archive", e))?;
     zip.write_all(serde_json::to_string_pretty(&manifest).unwrap().as_bytes())
         .map_err(|e| err("Écriture de l'archive", e))?;
-    zip.finish().map_err(|e| err("Finalisation de l'archive", e))?;
+    zip.finish()
+        .map_err(|e| err("Finalisation de l'archive", e))?;
+    report("verify", "Vérification de l'archive…".into(), 0, 1);
+    verifier_archive(&tmp_path, &est_annule)?;
+    if obs_ouvert() {
+        return Err(crate::obs::OBS_RUNNING_MSG.to_string());
+    }
     std::fs::rename(&tmp_path, output_path)
         .map_err(|e| err(&format!("Mise en place de {}", output_path.display()), e))?;
     nettoyage.actif = false;
@@ -648,6 +801,44 @@ pub fn create(
         plugins: plugins.len(),
         assets: assets.len(),
     })
+}
+
+fn archive_illisible(e: impl std::fmt::Display) -> String {
+    err(
+        "L'archive écrite ne se relit pas correctement (disque ou clé USB défaillant ?)",
+        e,
+    )
+}
+
+/// Relit chaque entrée d'une archive jusqu'au bout - la crate `zip` contrôle
+/// alors le CRC32 - puis valide le manifest : la garantie qu'une sauvegarde
+/// copiée sur clé USB se relira.
+pub fn verifier_archive(path: &Path, est_annule: &dyn Fn() -> bool) -> Result<(), String> {
+    let mut archive = zip::ZipArchive::new(File::open(path).map_err(archive_illisible)?)
+        .map_err(archive_illisible)?;
+    let mut buf = vec![0u8; 512 * 1024];
+    for i in 0..archive.len() {
+        let mut entry = archive.by_index(i).map_err(archive_illisible)?;
+        loop {
+            if est_annule() {
+                return Err(MSG_ANNULATION.to_string());
+            }
+            if entry.read(&mut buf).map_err(archive_illisible)? == 0 {
+                break;
+            }
+        }
+    }
+    let mut texte = String::new();
+    archive
+        .by_name("manifest.json")
+        .map_err(archive_illisible)?
+        .read_to_string(&mut texte)
+        .map_err(archive_illisible)?;
+    let manifest: Manifest = serde_json::from_str(&texte).map_err(archive_illisible)?;
+    if manifest.format_version != FORMAT_VERSION {
+        return Err(archive_illisible("version de format inattendue"));
+    }
+    Ok(())
 }
 
 /// Table de correspondance chemin d'origine (normalisé) → chemin d'archive,
@@ -667,8 +858,7 @@ pub fn asset_mapping_from_manifest(manifest: &Manifest) -> BTreeMap<String, Stri
 
 #[cfg(test)]
 mod tests {
-    use super::{count_browser_sources, third_party_plugins};
-    use serde_json::json;
+    use super::third_party_plugins;
 
     #[test]
     fn dossier_plugins_absent_ou_incomplet_aucun_plugin_sans_erreur() {
@@ -679,37 +869,5 @@ mod tests {
         std::fs::create_dir_all(sans_bin.join("data")).unwrap();
         std::fs::write(sans_bin.join("obs-shaderfilter.dll"), "HORS-BIN").unwrap();
         assert!(third_party_plugins(None, Some(&dir.path().join("plugins"))).is_empty());
-    }
-
-    #[test]
-    fn les_sources_navigateur_web_sont_comptees_meme_imbriquees() {
-        let scene = json!({
-            "sources": [
-                { "id": "browser_source",
-                  "settings": { "url": "https://streamelements.com/overlay/abc/TOKEN" } },
-                { "id": "browser_source",
-                  "settings": { "url": "HTTP://exemple.test/alertes" } },
-                { "id": "group", "settings": { "items": [
-                    { "id": "browser_source",
-                      "settings": { "url": "https://streamlabs.com/widget/xyz" } }
-                ] } },
-                { "id": "image_source", "settings": { "file": "C:/logo.png" } }
-            ]
-        });
-        assert_eq!(count_browser_sources(&scene), 3);
-    }
-
-    #[test]
-    fn les_sources_navigateur_sans_url_web_ne_sont_pas_comptees() {
-        let scene = json!({
-            "sources": [
-                { "id": "browser_source", "settings": { "is_local_file": true,
-                  "local_file": "C:/overlay/index.html", "url": "" } },
-                { "id": "browser_source", "settings": {} },
-                { "id": "browser_source" },
-                { "id": "text_gdiplus", "settings": { "url": "https://pas-un-navigateur.test" } }
-            ]
-        });
-        assert_eq!(count_browser_sources(&scene), 0);
     }
 }

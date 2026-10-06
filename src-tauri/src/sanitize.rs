@@ -38,9 +38,9 @@ fn json_key_is_sensitive(key: &str) -> bool {
 /// Une clé INI est-elle sensible ? (RefreshToken=, StreamKey=, …)
 fn ini_key_is_sensitive(key: &str) -> bool {
     let k = key.trim().to_lowercase();
-    k == "key"
-        || k == "stream_key"
-        || k == "streamkey"
+    // Même règle qu'en JSON pour « key » : ApiKey=, ClientKey=… mais pas
+    // les raccourcis clavier (Hotkey…).
+    (k.ends_with("key") && !k.contains("hotkey"))
         || k.contains("token")
         || k.contains("secret")
         || k.contains("password")
@@ -64,6 +64,57 @@ pub fn sanitize_json(value: &mut Value) -> usize {
         Value::Array(items) => items.iter_mut().map(sanitize_json).sum(),
         _ => 0,
     }
+}
+
+/// Comme `sanitize_json`, mais conserve les raccourcis clavier qu'OBS
+/// enregistre dans les réglages des scripts (`{"key": "OBS_KEY_F1"}`).
+fn sanitize_json_hors_raccourcis(value: &mut Value) -> usize {
+    match value {
+        Value::Object(map) => {
+            let before = map.len();
+            map.retain(|k, v| {
+                !json_key_is_sensitive(k)
+                    || (k == "key" && v.as_str().is_some_and(|s| s.starts_with("OBS_KEY_")))
+            });
+            let mut removed = before - map.len();
+            for v in map.values_mut() {
+                removed += sanitize_json_hors_raccourcis(v);
+            }
+            removed
+        }
+        Value::Array(items) => items.iter_mut().map(sanitize_json_hors_raccourcis).sum(),
+        _ => 0,
+    }
+}
+
+/// Assainit les réglages des scripts d'une collection de scènes
+/// (`modules["scripts-tool"][].settings`) : un script de chat peut y garder
+/// un token en clair. Le reste de la collection n'est pas touché.
+pub fn sanitize_scripts_collection(collection: &mut Value) -> usize {
+    collection
+        .pointer_mut("/modules/scripts-tool")
+        .and_then(Value::as_array_mut)
+        .into_iter()
+        .flatten()
+        .filter_map(|script| script.get_mut("settings"))
+        .map(sanitize_json_hors_raccourcis)
+        .sum()
+}
+
+/// Désactive le serveur obs-websocket (`plugin_config/obs-websocket/
+/// config.json`) : actif et sans mot de passe après restauration, il
+/// laisserait n'importe quel poste du réseau local piloter OBS. `first_load`
+/// fait régénérer un mot de passe par obs-websocket au prochain lancement.
+pub fn neutraliser_obs_websocket(config: &mut Value) {
+    if let Some(map) = config.as_object_mut() {
+        map.insert("server_enabled".into(), Value::Bool(false));
+        map.insert("first_load".into(), Value::Bool(true));
+    }
+}
+
+/// Le chemin relatif (slashes avant, minuscules) est-il la config d'obs-websocket ?
+pub fn est_config_obs_websocket(rel: &str) -> bool {
+    rel == "plugin_config/obs-websocket/config.json"
 }
 
 /// Supprime les lignes sensibles d'un fichier INI (basic.ini, global.ini…).
@@ -205,10 +256,56 @@ mod tests {
     }
 
     #[test]
+    fn les_cles_ini_finissant_par_key_sont_retirees_sauf_raccourcis() {
+        let ini = "[Plugin]\nApiKey=SECRET1\nClientKey=SECRET2\nkey=SECRET3\nHotkeyFocusBehavior=0\nKeyframes=2\n";
+        let clean = sanitize_ini(ini);
+        assert!(!clean.contains("SECRET"), "{clean}");
+        assert!(clean.contains("HotkeyFocusBehavior=0"));
+        assert!(clean.contains("Keyframes=2"));
+    }
+
+    #[test]
+    fn reglages_des_scripts_assainis_raccourcis_conserves() {
+        let mut collection = json!({
+            "sources": [ { "hotkeys": { "OBSBasic.Hotkey": [ { "key": "OBS_KEY_F2" } ] } } ],
+            "modules": { "scripts-tool": [ {
+                "path": "C:/scripts/chat.lua",
+                "settings": {
+                    "channel": "streamer",
+                    "oauth_token": "SECRET1",
+                    "api_key": "SECRET2",
+                    "toggle_hotkey": [ { "key": "OBS_KEY_F1", "shift": true } ]
+                }
+            } ] }
+        });
+        assert_eq!(sanitize_scripts_collection(&mut collection), 2);
+        let text = collection.to_string();
+        assert!(!text.contains("SECRET"), "{text}");
+        assert!(text.contains("OBS_KEY_F1") && text.contains("OBS_KEY_F2"));
+        assert_eq!(
+            collection["modules"]["scripts-tool"][0]["settings"]["channel"],
+            "streamer"
+        );
+    }
+
+    #[test]
+    fn obs_websocket_neutralise() {
+        let mut v = json!({ "server_enabled": true, "first_load": false, "server_port": 4455 });
+        neutraliser_obs_websocket(&mut v);
+        assert_eq!(v["server_enabled"], false);
+        assert_eq!(v["first_load"], true);
+        assert_eq!(v["server_port"], 4455);
+    }
+
+    #[test]
     fn exclut_les_dossiers_sensibles_ou_inutiles() {
         assert!(is_excluded_config_path("logs/2026-07-16.txt"));
-        assert!(is_excluded_config_path("plugin_config/obs-browser/obs_profile_cookies/cookies.sqlite"));
-        assert!(!is_excluded_config_path("plugin_config/obs-websocket/config.json"));
+        assert!(is_excluded_config_path(
+            "plugin_config/obs-browser/obs_profile_cookies/cookies.sqlite"
+        ));
+        assert!(!is_excluded_config_path(
+            "plugin_config/obs-websocket/config.json"
+        ));
         assert!(!is_excluded_config_path("basic/scenes/scenes.json"));
         assert!(is_excluded_config_path(".sentinel/run_x"));
         assert!(!is_excluded_config_path("basic/scenes/.sentinel.json"));

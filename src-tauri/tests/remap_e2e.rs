@@ -6,10 +6,10 @@
 //! STREAMPOD_* sont globales au processus, et ce binaire tourne dans son propre
 //! processus - aucune interférence avec e2e.rs ou zip_slip.rs.
 
-use streampod_lib::devices::{Famille, Peripherique};
-use streampod_lib::{backup, remap, restore};
 use std::fs;
 use std::path::Path;
+use streampod_lib::devices::{Famille, Peripherique};
+use streampod_lib::{backup, remap, restore};
 
 const FAKE_STREAM_KEY: &str = "live_9999_ULTRASECRETSTREAMKEY";
 
@@ -96,14 +96,27 @@ fn remappage_de_bout_en_bout() {
     let config_src = root.join("obs-studio-src");
     build_fake_config(&config_src);
     let backup_file = root.join("remap.obsbackup");
-    backup::create(&config_src, None, None, Some("32.0.0".to_string()), &backup_file, |_| {}, || false).unwrap();
+    backup::create(
+        &config_src,
+        None,
+        None,
+        Some("32.0.0".to_string()),
+        &backup_file,
+        |_| {},
+        || false,
+    )
+    .unwrap();
     let archive_avant = fs::read(&backup_file).unwrap();
 
     // --- Machine cible : bac à sable + inventaire factice ---
     let sandbox = root.join("machine2");
     let config_dst = sandbox.join("obs-studio");
     let devices_json = root.join("devices.json");
-    fs::write(&devices_json, serde_json::to_string(&inventaire_cible()).unwrap()).unwrap();
+    fs::write(
+        &devices_json,
+        serde_json::to_string(&inventaire_cible()).unwrap(),
+    )
+    .unwrap();
     std::env::set_var("STREAMPOD_CONFIG_DIR", &config_dst);
     std::env::set_var("STREAMPOD_ASSETS_DIR", sandbox.join("OBS-Backup-Assets"));
     std::env::set_var("STREAMPOD_INSTALL_DIR", sandbox.join("obs-install"));
@@ -182,11 +195,17 @@ fn remappage_de_bout_en_bout() {
     assert_eq!(sources[1]["settings"]["device_id"], NOUVEAU_MICRO);
     // La webcam est réécrite sur ses deux champs miroir.
     assert_eq!(sources[2]["settings"]["video_device_id"], NOUVELLE_WEBCAM);
-    assert_eq!(sources[2]["settings"]["last_video_device_id"], NOUVELLE_WEBCAM);
+    assert_eq!(
+        sources[2]["settings"]["last_video_device_id"],
+        NOUVELLE_WEBCAM
+    );
     // La source du plugin tiers est strictement intacte.
     assert_eq!(sources[3]["settings"]["device_id"], ID_PLUGIN_TIERS);
     // Laissé inchangé par l'utilisateur : l'ancien casque reste tel quel.
-    assert_eq!(scene["DesktopAudioDevice1"]["settings"]["device_id"], ANCIEN_CASQUE);
+    assert_eq!(
+        scene["DesktopAudioDevice1"]["settings"]["device_id"],
+        ANCIEN_CASQUE
+    );
     // La valeur spéciale `default` n'est jamais réécrite.
     assert_eq!(scene["AuxAudioDevice1"]["settings"]["device_id"], "default");
 
@@ -211,5 +230,8 @@ fn remappage_de_bout_en_bout() {
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .filter(|n| n.starts_with("obs-studio.tmp-"))
         .collect();
-    assert!(orphelins.is_empty(), "dossiers temporaires restants : {orphelins:?}");
+    assert!(
+        orphelins.is_empty(),
+        "dossiers temporaires restants : {orphelins:?}"
+    );
 }
