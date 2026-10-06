@@ -130,6 +130,9 @@ mod tests {
             scene["sources"][0]["settings"]["file"],
             "D:/Assets/Overlay.PNG"
         );
-        assert_eq!(scene["sources"][1]["playlist"][0]["value"], "D:/Assets/intro.mp4");
+        assert_eq!(
+            scene["sources"][1]["playlist"][0]["value"],
+            "D:/Assets/intro.mp4"
+        );
     }
 }

@@ -1,11 +1,11 @@
 //! Test adversarial : une archive .obsbackup piégée (zip slip) doit être
 //! refusée en bloc, sans écrire le moindre fichier hors du bac à sable.
 
-use streampod_lib::backup::{AssetEntry, Manifest, PluginInfo, FORMAT_VERSION};
-use streampod_lib::restore;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
+use streampod_lib::backup::{AssetEntry, Manifest, PluginInfo, FORMAT_VERSION};
+use streampod_lib::restore;
 
 fn manifest_minimal() -> Manifest {
     Manifest {
@@ -102,9 +102,21 @@ fn archive_piegee_refusee_sans_ecriture_hors_bac_a_sable() {
     restauration_refusee(&piege3);
 
     // Aucun fichier n'a été écrit hors du bac à sable.
-    assert!(!evil1.exists(), "le PoC zip slip a écrit {}", evil1.display());
-    assert!(!evil2.exists(), "la traversée ..\\ a écrit {}", evil2.display());
-    assert!(!evil3.exists(), "le manifest piégé a écrit {}", evil3.display());
+    assert!(
+        !evil1.exists(),
+        "le PoC zip slip a écrit {}",
+        evil1.display()
+    );
+    assert!(
+        !evil2.exists(),
+        "la traversée ..\\ a écrit {}",
+        evil2.display()
+    );
+    assert!(
+        !evil3.exists(),
+        "le manifest piégé a écrit {}",
+        evil3.display()
+    );
     assert!(!assets_dst.exists(), "aucun asset ne devait être restauré");
 
     // La configuration d'origine est intacte : contenu inchangé, pas de
@@ -113,11 +125,15 @@ fn archive_piegee_refusee_sans_ecriture_hors_bac_a_sable() {
         fs::read_to_string(config_dst.join("global.ini")).unwrap(),
         sentinelle
     );
-    let bak_cree = fs::read_dir(root)
-        .unwrap()
-        .flatten()
-        .any(|e| e.file_name().to_string_lossy().starts_with("obs-studio.bak-"));
-    assert!(!bak_cree, "aucune copie de sécurité ne doit être créée sur refus");
+    let bak_cree = fs::read_dir(root).unwrap().flatten().any(|e| {
+        e.file_name()
+            .to_string_lossy()
+            .starts_with("obs-studio.bak-")
+    });
+    assert!(
+        !bak_cree,
+        "aucune copie de sécurité ne doit être créée sur refus"
+    );
 
     // Scénario 4 : DLL arbitraire. L'archive embarque une DLL sous
     // plugins/64bit/ visant à écraser un plugin officiel, et son manifest -

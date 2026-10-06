@@ -81,8 +81,7 @@ mod win {
     use super::{encoder_dstr, Famille, Peripherique};
     use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
     use windows::Win32::Media::Audio::{
-        eCapture, eRender, EDataFlow, IMMDeviceEnumerator, MMDeviceEnumerator,
-        DEVICE_STATE_ACTIVE,
+        eCapture, eRender, EDataFlow, IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
     };
     use windows::Win32::Media::DirectShow::ICreateDevEnum;
     use windows::Win32::System::Com::StructuredStorage::IPropertyBag;
@@ -135,22 +134,19 @@ mod win {
 
     /// Endpoints audio actifs via l'API MMDevice. `IMMDevice::GetId` retourne
     /// exactement l'identifiant qu'OBS écrit dans `settings.device_id`.
-    fn audio(
-        flux: EDataFlow,
-        famille: Famille,
-        out: &mut Vec<Peripherique>,
-    ) -> Result<(), String> {
+    fn audio(flux: EDataFlow, famille: Famille, out: &mut Vec<Peripherique>) -> Result<(), String> {
         let ctx = "Énumération des périphériques audio";
         unsafe {
             let enumerateur: IMMDeviceEnumerator =
-                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)
-                    .map_err(|e| err(ctx, e))?;
+                CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).map_err(|e| err(ctx, e))?;
             let collection = enumerateur
                 .EnumAudioEndpoints(flux, DEVICE_STATE_ACTIVE)
                 .map_err(|e| err(ctx, e))?;
             let count = collection.GetCount().map_err(|e| err(ctx, e))?;
             for i in 0..count {
-                let Ok(device) = collection.Item(i) else { continue };
+                let Ok(device) = collection.Item(i) else {
+                    continue;
+                };
                 let Ok(id_ptr) = device.GetId() else { continue };
                 let id = id_ptr.to_string().unwrap_or_default();
                 CoTaskMemFree(Some(id_ptr.as_ptr() as *const _));
@@ -165,7 +161,11 @@ mod win {
                 out.push(Peripherique {
                     famille,
                     id,
-                    nom: if nom.is_empty() { "Périphérique audio".into() } else { nom },
+                    nom: if nom.is_empty() {
+                        "Périphérique audio".into()
+                    } else {
+                        nom
+                    },
                 });
             }
         }
@@ -194,7 +194,9 @@ mod win {
                 if moniker_enum.Next(&mut monikers, None).is_err() {
                     break;
                 }
-                let Some(moniker) = monikers[0].take() else { break };
+                let Some(moniker) = monikers[0].take() else {
+                    break;
+                };
                 let Ok(bag) = moniker.BindToStorage::<_, _, IPropertyBag>(None, None) else {
                     continue;
                 };

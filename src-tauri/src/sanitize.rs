@@ -207,8 +207,12 @@ mod tests {
     #[test]
     fn exclut_les_dossiers_sensibles_ou_inutiles() {
         assert!(is_excluded_config_path("logs/2026-07-16.txt"));
-        assert!(is_excluded_config_path("plugin_config/obs-browser/obs_profile_cookies/cookies.sqlite"));
-        assert!(!is_excluded_config_path("plugin_config/obs-websocket/config.json"));
+        assert!(is_excluded_config_path(
+            "plugin_config/obs-browser/obs_profile_cookies/cookies.sqlite"
+        ));
+        assert!(!is_excluded_config_path(
+            "plugin_config/obs-websocket/config.json"
+        ));
         assert!(!is_excluded_config_path("basic/scenes/scenes.json"));
         assert!(is_excluded_config_path(".sentinel/run_x"));
         assert!(!is_excluded_config_path("basic/scenes/.sentinel.json"));

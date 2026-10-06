@@ -1,10 +1,10 @@
 //! Test end-to-end : backup → restore sur une fausse configuration OBS.
 //! Vérifie notamment qu'aucune clé de stream ne fuit dans l'archive.
 
-use streampod_lib::{backup, restore};
 use std::fs;
 use std::io::Read;
 use std::path::Path;
+use streampod_lib::{backup, restore};
 
 const FAKE_STREAM_KEY: &str = "live_9999_ULTRASECRETSTREAMKEY";
 const FAKE_TOKEN: &str = "oauthTOKENsecret123";
@@ -112,7 +112,10 @@ fn build_fake_install(root: &Path) {
     fs::create_dir_all(&plugins).unwrap();
     fs::write(plugins.join("win-capture.dll"), "OFFICIEL").unwrap();
     fs::write(plugins.join("move-transition.dll"), "PLUGIN-TIERS").unwrap();
-    let data = root.join("data").join("obs-plugins").join("move-transition");
+    let data = root
+        .join("data")
+        .join("obs-plugins")
+        .join("move-transition");
     fs::create_dir_all(&data).unwrap();
     fs::write(data.join("locale.ini"), "[fr-FR]\nNom=Move").unwrap();
 }
@@ -122,10 +125,25 @@ fn build_fake_install(root: &Path) {
 fn build_fake_plugins_dir(root: &Path) {
     let shader = root.join("plugins").join("obs-shaderfilter");
     fs::create_dir_all(shader.join("bin").join("64bit")).unwrap();
-    fs::write(shader.join("bin").join("64bit").join("obs-shaderfilter.dll"), "PLUGIN-TIERS").unwrap();
+    fs::write(
+        shader
+            .join("bin")
+            .join("64bit")
+            .join("obs-shaderfilter.dll"),
+        "PLUGIN-TIERS",
+    )
+    .unwrap();
     fs::create_dir_all(shader.join("data").join("locale")).unwrap();
-    fs::write(shader.join("data").join("locale").join("fr-FR.ini"), "Nom=Shader").unwrap();
-    let doublon = root.join("plugins").join("move-transition").join("bin").join("64bit");
+    fs::write(
+        shader.join("data").join("locale").join("fr-FR.ini"),
+        "Nom=Shader",
+    )
+    .unwrap();
+    let doublon = root
+        .join("plugins")
+        .join("move-transition")
+        .join("bin")
+        .join("64bit");
     fs::create_dir_all(&doublon).unwrap();
     fs::write(doublon.join("move-transition.dll"), "PLUGIN-TIERS").unwrap();
 }
@@ -182,7 +200,10 @@ fn backup_puis_restore_round_trip() {
     );
     assert_eq!(summary.scene_collections, 1);
     assert_eq!(summary.profiles, 1);
-    assert_eq!(summary.plugins, 2, "seuls les plugins tiers, sans doublon, doivent être inclus");
+    assert_eq!(
+        summary.plugins, 2,
+        "seuls les plugins tiers, sans doublon, doivent être inclus"
+    );
     assert_eq!(summary.assets, 1);
     assert!(
         !backup_file.with_extension("obsbackup.tmp").exists(),
@@ -233,9 +254,9 @@ fn backup_puis_restore_round_trip() {
         "un JSON de plugin invalide ne doit jamais être copié tel quel dans l'archive"
     );
     assert!(
-        !names
-            .iter()
-            .any(|n| n.contains("plugin-exotique") || n.ends_with(".sqlite") || n.ends_with(".yaml")),
+        !names.iter().any(|n| n.contains("plugin-exotique")
+            || n.ends_with(".sqlite")
+            || n.ends_with(".yaml")),
         "sous plugin_config/, seuls les .json et .ini assainis sont archivés (liste blanche)"
     );
 
@@ -279,7 +300,9 @@ fn backup_puis_restore_round_trip() {
 
     // La touche de raccourci "key" des scènes ne doit PAS être supprimée
     // (seul service.json est nettoyé).
-    let mut scene_entry = zip.by_name("config/basic/scenes/Ma Collection.json").unwrap();
+    let mut scene_entry = zip
+        .by_name("config/basic/scenes/Ma Collection.json")
+        .unwrap();
     let mut scene_text = String::new();
     scene_entry.read_to_string(&mut scene_text).unwrap();
     assert!(scene_text.contains("OBS_KEY_F1"));
@@ -330,7 +353,10 @@ fn backup_puis_restore_round_trip() {
     let restored_asset = assets_dst.join("0").join("overlay.png");
     assert!(restored_asset.is_file());
     let scene_text = fs::read_to_string(
-        config_dst.join("basic").join("scenes").join("Ma Collection.json"),
+        config_dst
+            .join("basic")
+            .join("scenes")
+            .join("Ma Collection.json"),
     )
     .unwrap();
     let expected = restored_asset.to_string_lossy().replace('\\', "/");
@@ -354,7 +380,13 @@ fn backup_puis_restore_round_trip() {
         .join("move-transition")
         .join("locale.ini")
         .exists());
-    assert_eq!(result.plugins, vec!["move-transition".to_string(), "obs-shaderfilter".to_string()]);
+    assert_eq!(
+        result.plugins,
+        vec![
+            "move-transition".to_string(),
+            "obs-shaderfilter".to_string()
+        ]
+    );
 
     // Aucun secret dans la config restaurée.
     let service_text = fs::read_to_string(
@@ -379,7 +411,9 @@ fn backup_puis_restore_round_trip() {
     // --- Seconde restauration : l'ancienne config est mise de côté ---
     std::thread::sleep(std::time::Duration::from_millis(1100)); // horodatage différent
     let result2 = restore::restore(&backup_file, &[], |_| {}, || false).unwrap();
-    let bak = result2.previous_config_backup.expect("copie de sécurité attendue");
+    let bak = result2
+        .previous_config_backup
+        .expect("copie de sécurité attendue");
     assert!(Path::new(&bak).join("global.ini").is_file());
 }
 
@@ -426,7 +460,16 @@ fn diagnostic_remappage_en_lecture_seule() {
 
     // --- Sauvegarde ---
     let backup_file = root.join("diag.obsbackup");
-    backup::create(&config_src, None, None, Some("32.1.2".to_string()), &backup_file, |_| {}, || false).unwrap();
+    backup::create(
+        &config_src,
+        None,
+        None,
+        Some("32.1.2".to_string()),
+        &backup_file,
+        |_| {},
+        || false,
+    )
+    .unwrap();
     let archive_avant = fs::read(&backup_file).unwrap();
 
     // --- Inventaire cible factice : le micro « valide » existe encore, la
@@ -518,14 +561,31 @@ fn backup_refuse_destination_dans_le_dossier_de_config() {
         config_src.join("piege.obsbackup"),
         config_src.join("basic").join("piege.obsbackup"),
     ] {
-        let err = backup::create(&config_src, None, None, None, &destination, |_| {}, || false)
-            .expect_err("une destination dans le dossier de config doit être refusée");
+        let err = backup::create(
+            &config_src,
+            None,
+            None,
+            None,
+            &destination,
+            |_| {},
+            || false,
+        )
+        .expect_err("une destination dans le dossier de config doit être refusée");
         assert!(err.contains("dossier de configuration"), "{err}");
         assert!(!destination.exists(), "aucun fichier ne doit être créé");
     }
 
     // Une destination ailleurs reste acceptée.
-    backup::create(&config_src, None, None, None, &root.join("ok.obsbackup"), |_| {}, || false).unwrap();
+    backup::create(
+        &config_src,
+        None,
+        None,
+        None,
+        &root.join("ok.obsbackup"),
+        |_| {},
+        || false,
+    )
+    .unwrap();
 }
 
 #[test]
@@ -550,8 +610,16 @@ fn backup_echoue_sans_laisser_de_fichier_incomplet() {
     .unwrap();
 
     let destination = root.join("echec.obsbackup");
-    backup::create(&config_src, None, None, None, &destination, |_| {}, || false)
-        .expect_err("un service.json corrompu doit faire échouer la sauvegarde");
+    backup::create(
+        &config_src,
+        None,
+        None,
+        None,
+        &destination,
+        |_| {},
+        || false,
+    )
+    .expect_err("un service.json corrompu doit faire échouer la sauvegarde");
     assert!(
         !destination.exists(),
         "aucune archive incomplète ne doit rester à la destination"
@@ -567,7 +635,9 @@ fn walkdir_noms(root: &Path) -> Vec<String> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        let Ok(entries) = fs::read_dir(&dir) else { continue };
+        let Ok(entries) = fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in entries.flatten() {
             out.push(entry.file_name().to_string_lossy().into_owned());
             if entry.path().is_dir() {

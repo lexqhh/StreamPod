@@ -134,7 +134,8 @@ fn scene_files(config_dir: &Path) -> Vec<PathBuf> {
         .flatten()
         .map(|e| e.path())
         .filter(|p| {
-            p.extension().is_some_and(|e| e.eq_ignore_ascii_case("json"))
+            p.extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("json"))
                 && !p
                     .file_name()
                     .is_some_and(|n| n.to_string_lossy().ends_with(".json.bak"))
@@ -246,9 +247,7 @@ fn dlls_du_dossier(dir: &Path) -> impl Iterator<Item = PathBuf> {
         .flatten()
         .flatten()
         .map(|e| e.path())
-        .filter(|p| {
-            p.is_file() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("dll"))
-        })
+        .filter(|p| p.is_file() && p.extension().is_some_and(|e| e.eq_ignore_ascii_case("dll")))
 }
 
 /// Détecte les plugins tiers aux deux emplacements chargés par OBS :
@@ -520,7 +519,8 @@ pub fn create(
         // (basic/scenes/**), qui contiennent des champs `key` légitimes
         // (raccourcis clavier) - celles-ci ne passent jamais par ici car
         // elles ne sont pas sous plugin_config/.
-        let is_plugin_json = rel_lower.starts_with("plugin_config/") && rel_lower.ends_with(".json");
+        let is_plugin_json =
+            rel_lower.starts_with("plugin_config/") && rel_lower.ends_with(".json");
         if is_service_json {
             let text = std::fs::read_to_string(path)
                 .map_err(|e| err(&format!("Lecture de {rel_str}"), e))?;
@@ -634,7 +634,8 @@ pub fn create(
         .map_err(|e| err("Écriture de l'archive", e))?;
     zip.write_all(serde_json::to_string_pretty(&manifest).unwrap().as_bytes())
         .map_err(|e| err("Écriture de l'archive", e))?;
-    zip.finish().map_err(|e| err("Finalisation de l'archive", e))?;
+    zip.finish()
+        .map_err(|e| err("Finalisation de l'archive", e))?;
     std::fs::rename(&tmp_path, output_path)
         .map_err(|e| err(&format!("Mise en place de {}", output_path.display()), e))?;
     nettoyage.actif = false;

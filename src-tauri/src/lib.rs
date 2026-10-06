@@ -15,8 +15,7 @@ use tauri::Emitter;
 /// global suffit ; remis à zéro au démarrage de chaque opération.
 static ANNULATION_DEMANDEE: AtomicBool = AtomicBool::new(false);
 
-const OBS_RUNNING_MSG: &str =
-    "OBS est en cours d'exécution. Fermez OBS puis réessayez.";
+const OBS_RUNNING_MSG: &str = "OBS est en cours d'exécution. Fermez OBS puis réessayez.";
 const NO_CONFIG_MSG: &str =
     "Aucune configuration OBS trouvée sur cet ordinateur (dossier obs-studio introuvable). \
      OBS a-t-il déjà été lancé ici ?";

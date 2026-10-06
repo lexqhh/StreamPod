@@ -131,11 +131,7 @@ fn tokens_communs(a: &str, b: &str) -> usize {
 /// ressemblant au moins ressemblant : nom normalisé identique, puis
 /// inclusion d'un nom dans l'autre, puis nombre de mots communs. À égalité,
 /// l'ordre alphabétique garantit un tri déterministe.
-fn candidats(
-    famille: Famille,
-    ancien_nom: &str,
-    inventaire: &[Peripherique],
-) -> Vec<Peripherique> {
+fn candidats(famille: Famille, ancien_nom: &str, inventaire: &[Peripherique]) -> Vec<Peripherique> {
     let ancien = normaliser_nom(ancien_nom);
     let mut compatibles: Vec<&Peripherique> =
         inventaire.iter().filter(|p| p.famille == famille).collect();
@@ -151,7 +147,12 @@ fn candidats(
         } else {
             2
         };
-        (rang, Reverse(tokens_communs(&ancien, &cand)), cand, p.id.clone())
+        (
+            rang,
+            Reverse(tokens_communs(&ancien, &cand)),
+            cand,
+            p.id.clone(),
+        )
     });
     compatibles.into_iter().cloned().collect()
 }
@@ -195,9 +196,7 @@ fn analyser_collection(
                 famille,
                 ancien_id: id.to_string(),
                 ancien_nom: match famille {
-                    Famille::Video => {
-                        devices::nom_video(id).unwrap_or_else(|| nom_source.clone())
-                    }
+                    Famille::Video => devices::nom_video(id).unwrap_or_else(|| nom_source.clone()),
                     _ => nom_source.clone(),
                 },
                 sources: Vec::new(),
@@ -281,8 +280,7 @@ pub fn analyser(
         if est_valide(famille, &id_normalise, &peripheriques) {
             references_valides += association.occurrences;
         } else {
-            association.candidats =
-                candidats(famille, &association.ancien_nom, &peripheriques);
+            association.candidats = candidats(famille, &association.ancien_nom, &peripheriques);
             a_confirmer.push(association);
         }
     }
@@ -375,7 +373,10 @@ fn remapper_source(
     // OBS maintient `last_video_device_id` en miroir de `video_device_id` :
     // les deux champs sont réécrits à l'identique.
     if famille == Famille::Video && settings.contains_key("last_video_device_id") {
-        settings.insert("last_video_device_id".to_string(), Value::String(remplacant));
+        settings.insert(
+            "last_video_device_id".to_string(),
+            Value::String(remplacant),
+        );
     }
     Some(cle)
 }
@@ -394,7 +395,9 @@ fn remapper_collection(
     let mut modifiees = 0;
     for (cle, valeur) in objet.iter_mut() {
         if cle == "sources" {
-            let Some(sources) = valeur.as_array_mut() else { continue };
+            let Some(sources) = valeur.as_array_mut() else {
+                continue;
+            };
             for source in sources {
                 if let Some(k) = remapper_source(source, nouveaux) {
                     *compte.entry(k).or_default() += 1;
@@ -427,7 +430,12 @@ pub fn appliquer(scenes_dir: &Path, choix: &[Choix]) -> Result<usize, String> {
     }
     let nouveaux: BTreeMap<CleAssociation, String> = choix
         .iter()
-        .map(|c| ((c.famille, normaliser_id(&c.ancien_id)), c.nouveau_id.clone()))
+        .map(|c| {
+            (
+                (c.famille, normaliser_id(&c.ancien_id)),
+                c.nouveau_id.clone(),
+            )
+        })
         .collect();
     let mut compte: BTreeMap<CleAssociation, usize> = BTreeMap::new();
 
@@ -535,8 +543,7 @@ mod tests {
 
         let rapport = analyser(&archive, vec![]).unwrap();
         assert_eq!(rapport.a_confirmer.len(), 3);
-        let familles: Vec<Famille> =
-            rapport.a_confirmer.iter().map(|a| a.famille).collect();
+        let familles: Vec<Famille> = rapport.a_confirmer.iter().map(|a| a.famille).collect();
         assert!(familles.contains(&Famille::EntreeAudio));
         assert!(familles.contains(&Famille::SortieAudio));
         assert!(familles.contains(&Famille::Video));
@@ -598,8 +605,11 @@ mod tests {
         let assoc = &rapport.a_confirmer[0];
         assert_eq!(assoc.occurrences, 2);
         assert_eq!(assoc.sources.len(), 2);
-        let collections: Vec<&str> =
-            assoc.sources.iter().map(|s| s.collection.as_str()).collect();
+        let collections: Vec<&str> = assoc
+            .sources
+            .iter()
+            .map(|s| s.collection.as_str())
+            .collect();
         assert!(collections.contains(&"Stream"));
         assert!(collections.contains(&"Record"));
     }
@@ -781,8 +791,16 @@ mod tests {
             )],
         );
         let inventaire = vec![
-            peripherique(Famille::EntreeAudio, "{0.0.1.00000000}.{bbbb}", "Microphone de la webcam"),
-            peripherique(Famille::EntreeAudio, "{0.0.1.00000000}.{cccc}", "RØDE NT-USB"),
+            peripherique(
+                Famille::EntreeAudio,
+                "{0.0.1.00000000}.{bbbb}",
+                "Microphone de la webcam",
+            ),
+            peripherique(
+                Famille::EntreeAudio,
+                "{0.0.1.00000000}.{cccc}",
+                "RØDE NT-USB",
+            ),
             peripherique(Famille::SortieAudio, "{0.0.0.00000000}.{dddd}", "Casque"),
         ];
 
@@ -813,7 +831,11 @@ mod tests {
         );
         let inventaire = vec![
             peripherique(Famille::Video, "Carte de capture:x", "Carte de capture"),
-            peripherique(Famille::Video, "Webcam C900:nouveau#22chemin", "Webcam C900"),
+            peripherique(
+                Famille::Video,
+                "Webcam C900:nouveau#22chemin",
+                "Webcam C900",
+            ),
             peripherique(Famille::Video, "Webcam C920:y", "Webcam C920"),
         ];
 
@@ -911,8 +933,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            valides[0].nouveau_id,
-            "{0.0.1.00000000}.{AAAA}",
+            valides[0].nouveau_id, "{0.0.1.00000000}.{AAAA}",
             "l'identifiant canonique de l'inventaire doit être conservé"
         );
     }
@@ -961,8 +982,16 @@ mod tests {
             peripherique(Famille::EntreeAudio, "{0.0.1.00000000}.{bbbb}", "Micro B"),
         ];
         let doublon = [
-            choix(Famille::EntreeAudio, "{0.0.1.00000000}.{Vieux}", "{0.0.1.00000000}.{aaaa}"),
-            choix(Famille::EntreeAudio, "{0.0.1.00000000}.{vieux}", "{0.0.1.00000000}.{bbbb}"),
+            choix(
+                Famille::EntreeAudio,
+                "{0.0.1.00000000}.{Vieux}",
+                "{0.0.1.00000000}.{aaaa}",
+            ),
+            choix(
+                Famille::EntreeAudio,
+                "{0.0.1.00000000}.{vieux}",
+                "{0.0.1.00000000}.{bbbb}",
+            ),
         ];
         let e = valider_choix(
             &doublon,
@@ -1038,11 +1067,17 @@ mod tests {
                 .unwrap();
         let sources = racine["sources"].as_array().unwrap();
         // Champ remplacé, autres réglages conservés.
-        assert_eq!(sources[0]["settings"]["device_id"], "{0.0.1.00000000}.{neuf}");
+        assert_eq!(
+            sources[0]["settings"]["device_id"],
+            "{0.0.1.00000000}.{neuf}"
+        );
         assert_eq!(sources[0]["settings"]["use_device_timing"], true);
         assert_eq!(sources[0]["volume"], 0.8);
         // La source inconnue est strictement intacte.
-        assert_eq!(sources[1]["settings"]["device_id"], "{0.0.1.00000000}.{vieux}");
+        assert_eq!(
+            sources[1]["settings"]["device_id"],
+            "{0.0.1.00000000}.{vieux}"
+        );
     }
 
     #[test]
@@ -1067,13 +1102,16 @@ mod tests {
 
         appliquer(
             &scenes,
-            &[choix(Famille::Video, "Webcam C900:ancien", "Webcam C900:nouveau")],
+            &[choix(
+                Famille::Video,
+                "Webcam C900:ancien",
+                "Webcam C900:nouveau",
+            )],
         )
         .unwrap();
 
         let racine: Value =
-            serde_json::from_str(&std::fs::read_to_string(scenes.join("S.json")).unwrap())
-                .unwrap();
+            serde_json::from_str(&std::fs::read_to_string(scenes.join("S.json")).unwrap()).unwrap();
         let settings = &racine["sources"][0]["settings"];
         assert_eq!(settings["video_device_id"], "Webcam C900:nouveau");
         assert_eq!(settings["last_video_device_id"], "Webcam C900:nouveau");
@@ -1143,16 +1181,16 @@ mod tests {
 
         assert_eq!(appliquer(&scenes, &[]).unwrap(), 0);
         // Aucun choix (« Laisser inchangé ») : fichier inchangé au bit près.
-        assert_eq!(std::fs::read_to_string(scenes.join("S.json")).unwrap(), contenu);
+        assert_eq!(
+            std::fs::read_to_string(scenes.join("S.json")).unwrap(),
+            contenu
+        );
     }
 
     #[test]
     fn applique_refuse_un_choix_sans_aucune_occurrence() {
         let dir = tempfile::tempdir().unwrap();
-        let scenes = scenes_factices(
-            dir.path(),
-            &[("S.json", collection_type("S", json!([])))],
-        );
+        let scenes = scenes_factices(dir.path(), &[("S.json", collection_type("S", json!([])))]);
 
         let e = appliquer(
             &scenes,

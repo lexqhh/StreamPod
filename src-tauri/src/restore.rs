@@ -87,12 +87,8 @@ pub struct RestoreSummary {
 pub(crate) fn open_archive(backup_path: &Path) -> Result<ZipArchive<File>, String> {
     let file = File::open(backup_path)
         .map_err(|e| err(&format!("Ouverture de {}", backup_path.display()), e))?;
-    ZipArchive::new(file).map_err(|e| {
-        err(
-            "Ce fichier n'est pas une sauvegarde .obsbackup valide",
-            e,
-        )
-    })
+    ZipArchive::new(file)
+        .map_err(|e| err("Ce fichier n'est pas une sauvegarde .obsbackup valide", e))
 }
 
 fn read_manifest(archive: &mut ZipArchive<File>) -> Result<Manifest, String> {
@@ -152,11 +148,7 @@ pub fn preview(backup_path: &Path) -> Result<RestorePreview, String> {
 }
 
 /// Extrait une entrée du ZIP vers un fichier sur le disque.
-fn extract_entry(
-    archive: &mut ZipArchive<File>,
-    index: usize,
-    dest: &Path,
-) -> Result<(), String> {
+fn extract_entry(archive: &mut ZipArchive<File>, index: usize, dest: &Path) -> Result<(), String> {
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| err(&format!("Création du dossier {}", parent.display()), e))?;
@@ -164,8 +156,8 @@ fn extract_entry(
     let mut entry = archive
         .by_index(index)
         .map_err(|e| err("Lecture de l'archive", e))?;
-    let mut out = File::create(dest)
-        .map_err(|e| err(&format!("Création de {}", dest.display()), e))?;
+    let mut out =
+        File::create(dest).map_err(|e| err(&format!("Création de {}", dest.display()), e))?;
     std::io::copy(&mut entry, &mut out)
         .map_err(|e| err(&format!("Extraction vers {}", dest.display()), e))?;
     Ok(())
@@ -352,10 +344,7 @@ pub fn restore(
             .ok_or("Impossible de déterminer le dossier Documents pour les assets.")?;
         let transit = assets_dir.with_file_name(format!(
             "{}.tmp-{stamp}",
-            assets_dir
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
+            assets_dir.file_name().unwrap_or_default().to_string_lossy()
         ));
         for asset in &manifest.assets {
             // archive_path = assets/<n>/<nom> → <assets_dir>/<n>/<nom>.
@@ -410,13 +399,20 @@ pub fn restore(
                 return Err(MSG_ANNULATION.to_string());
             }
             let (name, is_dir) = {
-                let entry = archive.by_index(i).map_err(|e| err("Lecture de l'archive", e))?;
+                let entry = archive
+                    .by_index(i)
+                    .map_err(|e| err("Lecture de l'archive", e))?;
                 (entry.name().to_string(), entry.is_dir())
             };
             if is_dir {
                 continue;
             }
-            report("extract", format!("Extraction : {name}"), i as u64, total_entries);
+            report(
+                "extract",
+                format!("Extraction : {name}"),
+                i as u64,
+                total_entries,
+            );
 
             if let Some(rel) = name.strip_prefix("config/") {
                 // Entrée exclue à la sauvegarde mais présente dans une archive

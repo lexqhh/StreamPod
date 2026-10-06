@@ -6,8 +6,8 @@
 //! - Restaure vers des dossiers temporaires (la vraie config n'est jamais
 //!   modifiée grâce aux variables STREAMPOD_*).
 
-use streampod_lib::{backup, obs, restore};
 use std::io::Read;
+use streampod_lib::{backup, obs, restore};
 
 #[test]
 #[ignore]
@@ -18,7 +18,12 @@ fn sauvegarde_reelle_puis_restauration_en_bac_a_sable() {
     };
     let install = obs::install_dir();
     let version = obs::installed_version();
-    println!("Config : {} | Install : {:?} | Version : {:?}", config.display(), install, version);
+    println!(
+        "Config : {} | Install : {:?} | Version : {:?}",
+        config.display(),
+        install,
+        version
+    );
 
     // Les clés de stream réellement présentes sur le disque ne doivent pas
     // se retrouver dans l'archive.
@@ -41,7 +46,10 @@ fn sauvegarde_reelle_puis_restauration_en_bac_a_sable() {
             }
         }
     }
-    println!("{} clé(s) de stream trouvée(s) dans la vraie config.", real_keys.len());
+    println!(
+        "{} clé(s) de stream trouvée(s) dans la vraie config.",
+        real_keys.len()
+    );
 
     let tmp = tempfile::tempdir().unwrap();
     let backup_file = tmp.path().join("smoke.obsbackup");
@@ -58,7 +66,11 @@ fn sauvegarde_reelle_puis_restauration_en_bac_a_sable() {
     .unwrap();
     println!(
         "Sauvegarde : {} scènes, {} profils, {} plugins, {} assets, {} octets",
-        summary.scene_collections, summary.profiles, summary.plugins, summary.assets, summary.file_size
+        summary.scene_collections,
+        summary.profiles,
+        summary.plugins,
+        summary.assets,
+        summary.file_size
     );
 
     // Inspection : pas de secrets, pas de cookies navigateur, pas de logs.
@@ -75,7 +87,10 @@ fn sauvegarde_reelle_puis_restauration_en_bac_a_sable() {
             entry.read_to_end(&mut content).unwrap();
             let text = String::from_utf8_lossy(&content);
             for key in &real_keys {
-                assert!(!text.contains(key.as_str()), "clé de stream trouvée dans {name}");
+                assert!(
+                    !text.contains(key.as_str()),
+                    "clé de stream trouvée dans {name}"
+                );
             }
         }
     }
@@ -97,8 +112,10 @@ fn sauvegarde_reelle_puis_restauration_en_bac_a_sable() {
         result.scene_collections, result.assets_restored, result.plugins_status, result.plugins
     );
     assert_eq!(result.scene_collections, summary.scene_collections);
-    assert!(sandbox.join("obs-studio").join("global.ini").is_file()
-        || sandbox.join("obs-studio").join("user.ini").is_file());
+    assert!(
+        sandbox.join("obs-studio").join("global.ini").is_file()
+            || sandbox.join("obs-studio").join("user.ini").is_file()
+    );
 }
 
 /// Énumération réelle des périphériques (lecture seule, aucune écriture).
@@ -110,9 +127,18 @@ fn inventaire_reel_des_peripheriques() {
     use streampod_lib::devices::{self, Famille};
 
     let inventaire = devices::inventaire_reel().unwrap();
-    let entrees = inventaire.iter().filter(|p| p.famille == Famille::EntreeAudio).count();
-    let sorties = inventaire.iter().filter(|p| p.famille == Famille::SortieAudio).count();
-    let videos = inventaire.iter().filter(|p| p.famille == Famille::Video).count();
+    let entrees = inventaire
+        .iter()
+        .filter(|p| p.famille == Famille::EntreeAudio)
+        .count();
+    let sorties = inventaire
+        .iter()
+        .filter(|p| p.famille == Famille::SortieAudio)
+        .count();
+    let videos = inventaire
+        .iter()
+        .filter(|p| p.famille == Famille::Video)
+        .count();
     println!("Inventaire : {entrees} entrée(s) audio, {sorties} sortie(s) audio, {videos} périphérique(s) vidéo");
 
     for p in &inventaire {
@@ -121,16 +147,19 @@ fn inventaire_reel_des_peripheriques() {
         match p.famille {
             Famille::EntreeAudio => assert!(
                 p.id.starts_with("{0.0.1."),
-                "format d'entrée audio inattendu pour « {} »", p.nom
+                "format d'entrée audio inattendu pour « {} »",
+                p.nom
             ),
             Famille::SortieAudio => assert!(
                 p.id.starts_with("{0.0.0."),
-                "format de sortie audio inattendu pour « {} »", p.nom
+                "format de sortie audio inattendu pour « {} »",
+                p.nom
             ),
             Famille::Video => {
                 assert!(
                     p.id.contains(':'),
-                    "identifiant vidéo sans séparateur pour « {} »", p.nom
+                    "identifiant vidéo sans séparateur pour « {} »",
+                    p.nom
                 );
                 assert_eq!(
                     devices::nom_video(&p.id).as_deref(),
