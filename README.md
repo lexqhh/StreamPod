@@ -186,9 +186,11 @@ toute installation :
   StreamPod redémarre ;
 - **version portable** : `StreamPod.exe` est remplacé sur place (son nom est
   conservé) et relancé. L'ancienne version est gardée jusqu'à ce que la
-  nouvelle démarre ; en cas d'échec, elle est remise en place. Si le dossier
-  n'est pas modifiable (clé USB protégée), StreamPod ouvre la page de
-  téléchargement.
+  nouvelle démarre ; en cas d'échec, elle est remise en place.
+
+Si la mise à jour échoue (dossier non modifiable, clé USB protégée, antivirus),
+StreamPod l'explique et propose d'ouvrir la page de téléchargement pour
+récupérer la nouvelle version à la main.
 
 La mise à jour est refusée pendant une sauvegarde ou une restauration.
 
@@ -278,6 +280,8 @@ TypeScript** vanilla, en français.
 - **Distribution** : installateur `StreamPod-setup.exe` en téléchargement
   principal, exécutable portable en alternative ; l'installateur MSI n'est
   plus publié.
+- **Démarrage** : la fenêtre s'ouvre sur un fond sombre au lieu d'un écran
+  blanc pendant le chargement.
 
 ### 0.2.0
 

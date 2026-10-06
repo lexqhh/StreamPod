@@ -1006,9 +1006,6 @@ function ecouterGlisserDeposer() {
 
 /* ---------- Mise à jour ---------- */
 
-// Début de maj::MSG_LECTURE_SEULE côté Rust : repli vers la page de la release.
-const MSG_LECTURE_SEULE = "Le dossier de StreamPod n'est pas accessible en écriture";
-
 let reglageMaj: ReglageMaj = { verifier_au_demarrage: true };
 
 function afficherEtatMaj(texte?: string, succes = false) {
@@ -1071,14 +1068,13 @@ async function installerMaj() {
     // En cas de succès, StreamPod se ferme et la nouvelle version démarre.
     await invoke("appliquer_mise_a_jour");
   } catch (e) {
-    const message = String(e);
     show("home");
-    showError(message);
-    if (message.startsWith(MSG_LECTURE_SEULE)) {
-      $("btn-maj-installer").classList.add("hidden");
-      $("btn-maj-release").classList.remove("hidden");
-      $("banniere-maj").classList.remove("hidden");
-    }
+    showError(String(e));
+    // Quel que soit l'échec (lecture seule, clé exFAT, antivirus…), le
+    // téléchargement manuel reste possible : jamais d'utilisateur bloqué.
+    $("btn-maj-installer").classList.add("hidden");
+    $("btn-maj-release").classList.remove("hidden");
+    $("banniere-maj").classList.remove("hidden");
   }
 }
 
