@@ -19,7 +19,9 @@ embarquer votre clé de stream.
 Changer d'ordinateur, streamer en déplacement, réinstaller Windows : StreamPod
 réunit vos **scènes, profils, paramètres, assets et la liste de vos plugins** dans une seule
 archive transportable sur clé USB, et remet tout en place de l'autre côté.
-Aucune connexion réseau, aucune télémétrie : **100 % local**.
+Vos données restent **100 % locales** : une seule requête, vers GitHub, pour
+vérifier les mises à jour - désactivable. Aucune télémétrie, aucune donnée
+envoyée.
 
 ## Sommaire
 
@@ -27,6 +29,7 @@ Aucune connexion réseau, aucune télémétrie : **100 % local**.
 - [Confidentialité](#confidentialité)
 - [Utilisation](#utilisation)
 - [Installation](#installation)
+- [Mises à jour](#mises-à-jour)
 - [Le format `.obsbackup`](#le-format-obsbackup)
 - [Compiler depuis les sources](#compiler-depuis-les-sources)
 - [Architecture](#architecture)
@@ -167,6 +170,33 @@ Les empreintes SHA-256 de chaque fichier sont publiées avec
 > avertissement au premier lancement. Choisissez **Informations complémentaires
 > → Exécuter quand même**.
 
+## Mises à jour
+
+Au démarrage, StreamPod vérifie s'il existe une nouvelle version : c'est sa
+**seule requête réseau**, vers GitHub, sans aucune donnée envoyée. Elle se
+désactive en un clic depuis l'accueil (« Recherche de mises à jour au démarrage
+· Désactiver »), et « Rechercher maintenant » lance une vérification à la
+demande. Hors ligne, rien ne s'affiche.
+
+Quand une version est disponible, un bandeau présente ses notes. Au clic sur
+**Mettre à jour**, le fichier est téléchargé et sa **signature vérifiée** avant
+toute installation :
+
+- **version installée** : l'installateur s'exécute sans question, puis
+  StreamPod redémarre ;
+- **version portable** : `StreamPod.exe` est remplacé sur place (son nom est
+  conservé) et relancé. L'ancienne version est gardée jusqu'à ce que la
+  nouvelle démarre ; en cas d'échec, elle est remise en place. Si le dossier
+  n'est pas modifiable (clé USB protégée), StreamPod ouvre la page de
+  téléchargement.
+
+La mise à jour est refusée pendant une sauvegarde ou une restauration.
+
+> [!NOTE]
+> Les versions 0.2.0 et antérieures n'intègrent pas cette fonction : téléchargez
+> la 0.3.0 une dernière fois à la main. Le réglage est mémorisé par PC : une
+> version portable sur clé USB le retrouve activé sur chaque nouvelle machine.
+
 ## Le format `.obsbackup`
 
 Un `.obsbackup` est une simple archive ZIP :
@@ -214,7 +244,8 @@ dans un bac à sable et **vérifie qu'aucun secret ne fuit** dans l'archive
 > Les tests ne touchent **jamais** votre vraie configuration OBS. Les variables
 > d'environnement `STREAMPOD_CONFIG_DIR`, `STREAMPOD_INSTALL_DIR`, `STREAMPOD_ASSETS_DIR`,
 > `STREAMPOD_PLUGINS_DIR`, `STREAMPOD_OBS_VERSION` et `STREAMPOD_POLICES` redirigent
-> tous les chemins et détections vers des valeurs de test.
+> tous les chemins et détections vers des valeurs de test ;
+> `STREAMPOD_UPDATER_DESACTIVE=1` coupe la recherche de mises à jour.
 
 ## Architecture
 
@@ -232,10 +263,21 @@ TypeScript** vanilla, en français.
 | `src-tauri/src/remap.rs` | Diagnostic et application du remappage matériel |
 | `src-tauri/src/polices.rs` | Polices installées (DirectWrite) |
 | `src-tauri/src/copies.rs` | Copies de sécurité : liste, retour, corbeille |
+| `src-tauri/src/maj.rs` | Mise à jour : mode installé/portable, réglage, signature, remplacement de l'exe |
 | `src-tauri/src/lib.rs` | Commandes exposées au frontend |
 | `src/main.ts` | Toute la logique de l'interface |
 
 ## Notes de version
+
+### 0.3.0
+
+- **Mise à jour intégrée** : recherche au démarrage (désactivable), bandeau avec
+  les notes de version, téléchargement signé puis installation en un clic -
+  installateur relancé en mode passif, ou remplacement de l'exécutable
+  portable avec retour arrière en cas d'échec.
+- **Distribution** : installateur `StreamPod-setup.exe` en téléchargement
+  principal, exécutable portable en alternative ; l'installateur MSI n'est
+  plus publié.
 
 ### 0.2.0
 
