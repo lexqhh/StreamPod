@@ -30,6 +30,7 @@ Aucune connexion réseau, aucune télémétrie : **100 % local**.
 - [Le format `.obsbackup`](#le-format-obsbackup)
 - [Développement](#développement)
 - [Architecture](#architecture)
+- [Notes de version](#notes-de-version)
 
 ## Fonctionnalités
 
@@ -201,8 +202,9 @@ dans un bac à sable et **vérifie qu'aucun secret ne fuit** dans l'archive
 
 > [!WARNING]
 > Les tests ne touchent **jamais** votre vraie configuration OBS. Les variables
-> d'environnement `STREAMPOD_CONFIG_DIR`, `STREAMPOD_INSTALL_DIR`, `STREAMPOD_ASSETS_DIR` et
-> `STREAMPOD_OBS_VERSION` redirigent tous les chemins vers des dossiers temporaires.
+> d'environnement `STREAMPOD_CONFIG_DIR`, `STREAMPOD_INSTALL_DIR`, `STREAMPOD_ASSETS_DIR`,
+> `STREAMPOD_PLUGINS_DIR`, `STREAMPOD_OBS_VERSION` et `STREAMPOD_POLICES` redirigent
+> tous les chemins et détections vers des valeurs de test.
 
 ## Architecture
 
@@ -213,13 +215,36 @@ TypeScript** vanilla, en français.
 |---|---|
 | `src-tauri/src/obs.rs` | Détection d'OBS (config, installation, version, processus) |
 | `src-tauri/src/sanitize.rs` | Suppression des secrets (clé de stream, tokens, cookies) |
-| `src-tauri/src/scenes.rs` | Extraction et réécriture des chemins d'assets |
+| `src-tauri/src/scenes.rs` | Analyse des scènes (chemins, dossiers, polices, scripts) et réécriture |
 | `src-tauri/src/backup.rs` | Pipeline de sauvegarde → `.obsbackup` |
 | `src-tauri/src/restore.rs` | Restauration avec sauvegarde de secours et rollback automatique |
 | `src-tauri/src/devices.rs` | Inventaire du matériel Windows (audio, vidéo) |
 | `src-tauri/src/remap.rs` | Diagnostic et application du remappage matériel |
+| `src-tauri/src/polices.rs` | Polices installées (DirectWrite) |
+| `src-tauri/src/copies.rs` | Copies de sécurité : liste, retour, corbeille |
 | `src-tauri/src/lib.rs` | Commandes exposées au frontend |
 | `src/main.ts` | Toute la logique de l'interface |
+
+## Notes de version
+
+### 0.2.0
+
+- **Sécurité** : toutes les pistes de l'audit du 2026-09-18 sont corrigées.
+  Scripts OBS désactivés à la restauration, programmes jamais embarqués,
+  obs-websocket désactivé, serveur de diffusion affiché dans l'aperçu,
+  fichiers de secrets exclus des assets, décompression bornée, noms de fichiers
+  Windows piégés refusés, assets jamais écrasés, OBS revérifié avant la mise
+  en place.
+- **Complétude** : dossiers de diaporama et de playlist VLC embarqués, polices
+  manquantes signalées, archive relue et contrôlée après l'écriture.
+- **Ergonomie** : ouverture d'un `.obsbackup` par double-clic ou
+  glisser-déposer, écran « Copies de sécurité » (retour à une configuration
+  précédente, corbeille), résumés dépliables.
+- **Compatibilité** : une sauvegarde créée par une version plus récente de
+  StreamPod est refusée avec un message clair ; une sauvegarde d'un OBS plus
+  récent que celui installé est signalée.
+- **Outillage** : CI GitHub Actions et release automatisée avec empreintes
+  SHA-256.
 
 ## Droits d'auteur
 
