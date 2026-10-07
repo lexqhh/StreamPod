@@ -46,24 +46,28 @@ jobs:
           npm ci
           npm run tauri build
 
-      - name: Binaires, signatures, latest.json et empreintes SHA-256
+      - name: Binaires, latest.json et notes de release
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           v="${GITHUB_REF_NAME#v}"
           base="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}"
-          mkdir dist-release
+          # Seuls les fichiers utiles sont publiés : les signatures vivent dans
+          # latest.json, les empreintes dans les notes.
+          mkdir dist-release signatures
           cp src-tauri/target/release/streampod.exe dist-release/StreamPod.exe
           cp src-tauri/target/release/bundle/nsis/*-setup.exe dist-release/StreamPod-setup.exe
-          cp src-tauri/target/release/bundle/nsis/*-setup.exe.sig dist-release/StreamPod-setup.exe.sig
+          cp src-tauri/target/release/bundle/nsis/*-setup.exe.sig signatures/StreamPod-setup.exe.sig
           npx tauri signer sign dist-release/StreamPod.exe
-          # Notes du bandeau de mise à jour : section « ### X.Y.Z » du README (sans suffixe -rc).
+          mv dist-release/StreamPod.exe.sig signatures/
+          # Nouveautés : section « ### X.Y.Z » du README (sans suffixe -rc), reprise
+          # par le bandeau de mise à jour et par les notes de release.
           awk -v v="### ${v%%-*}" '$0==v{f=1;next} /^##/{f=0} f' README.md > notes-maj.md
           node -e '
             const fs = require("fs");
             const [v, base] = process.argv.slice(1);
-            const sig = (f) => fs.readFileSync("dist-release/" + f + ".sig", "utf8").trim();
+            const sig = (f) => fs.readFileSync("signatures/" + f + ".sig", "utf8").trim();
             fs.writeFileSync("dist-release/latest.json", JSON.stringify({
               version: v,
               notes: fs.readFileSync("notes-maj.md", "utf8").trim(),
@@ -74,18 +78,27 @@ jobs:
               },
             }, null, 2));
           ' "$v" "$base"
-          cd dist-release
-          sha256sum * > SHA256SUMS.txt
           {
+            echo "## Télécharger"
+            echo
+            echo "- **[StreamPod-setup.exe]($base/StreamPod-setup.exe)** - installateur (recommandé)"
+            echo "- **[StreamPod.exe]($base/StreamPod.exe)** - version portable, pour une clé USB ou sans installation"
+            echo
+            echo "## Nouveautés"
+            cat notes-maj.md
+            echo
+            echo "**Réseau** : la recherche de mises à jour est la seule requête de StreamPod, vers GitHub, sans aucune donnée envoyée. Aucune télémétrie."
+            echo
             echo "## Vérification"
+            echo
             echo "SHA-256 :"
             echo '```'
-            cat SHA256SUMS.txt
+            (cd dist-release && sha256sum StreamPod-setup.exe StreamPod.exe | sed 's/ \*/  /')
             echo '```'
             echo
             echo "Exécutable non signé : si Windows SmartScreen s'affiche, choisissez"
             echo "« Informations complémentaires → Exécuter quand même »."
-          } > ../notes.md
+          } > notes.md
 
       - name: Brouillon de release
         env:
