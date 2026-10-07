@@ -161,9 +161,9 @@ droits administrateur, et s'associe aux fichiers `.obsbackup`.
 [`StreamPod.exe`](https://github.com/lexqhh/StreamPod/releases/latest/download/StreamPod.exe)
 se lance directement, sans rien installer.
 
-Les empreintes SHA-256 de chaque fichier sont publiées avec
-[la release](https://github.com/lexqhh/StreamPod/releases/latest)
-(`SHA256SUMS.txt`).
+Les empreintes SHA-256 des deux fichiers sont publiées dans les notes de
+[la release](https://github.com/lexqhh/StreamPod/releases/latest), bloc
+« Vérification ».
 
 > [!NOTE]
 > L'exécutable n'étant pas encore signé, Windows SmartScreen peut afficher un
